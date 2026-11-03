@@ -10,7 +10,6 @@ Usage: python3 server.py [--file ../todolist.txt] [--db todo.db] [--port 8787]
 
 import argparse
 import json
-import random
 import re
 import shutil
 import sqlite3
@@ -802,42 +801,23 @@ def _card_font(size: int, style: str = "regular"):
     return ImageFont.load_default()
 
 
-def _card_stats(conn, started_cond: str, done_cond: str, arg):
-    """Focused minutes, tasks done, and top category for a period filter."""
-    focused = conn.execute(
+def _card_focused(conn, started_cond: str, arg) -> int:
+    """Focused minutes for a period filter."""
+    return conn.execute(
         "SELECT COALESCE(SUM(minutes),0) FROM pomo_periods WHERE " + started_cond,
         (arg,),
     ).fetchone()[0]
-    tasks_done = conn.execute(
-        "SELECT COUNT(*) FROM tasks WHERE done_at IS NOT NULL AND " + done_cond,
-        (arg,),
-    ).fetchone()[0]
-    top = conn.execute(
-        "SELECT COALESCE(c.name,'Unallocated') AS name, SUM(p.minutes) AS m "
-        "FROM pomo_periods p LEFT JOIN categories c ON c.id=p.category_id "
-        "WHERE " + started_cond + " GROUP BY name ORDER BY m DESC LIMIT 1",
-        (arg,),
-    ).fetchone()
-    return focused, tasks_done, top
 
 
-def _card_small(tasks_done: int, top) -> list:
-    """Stat segments for the card; joined with dim middots at draw time."""
-    parts = [f"{tasks_done} task" if tasks_done == 1 else f"{tasks_done} tasks"]
-    if top and top["m"]:
-        parts.append(top["name"])
-    return parts
-
-
-def _card_render(big: str, small_parts, label: str = "") -> bytes:
-    """1080x1080 card, 1998 valve style: plain text on the tiled ceramic, no frames."""
+def _card_render(big: str, label: str = "") -> bytes:
+    """1080x1080 card, 1998 valve style: the period, the focused time, the word focused."""
     import base64
     import io
     from PIL import Image, ImageDraw, ImageEnhance
 
     W = H = 1080
     MARGIN = 90
-    GOLD, HI, DIM = "#d8a248", "#f0d0a0", "#a87830"
+    HI, DIM = "#f0d0a0", "#a87830"
 
     img = Image.new("RGB", (W, H))
     tile = Image.open(io.BytesIO(base64.b64decode(CERAMIC_GIF_B64))).convert("RGB")
@@ -847,46 +827,20 @@ def _card_render(big: str, small_parts, label: str = "") -> bytes:
     img = ImageEnhance.Brightness(img).enhance(0.85)  # dim the clay, keep the gold legible
     d = ImageDraw.Draw(img)
 
-    f_brand = _card_font(44, "bold")
-    f_tag = _card_font(24, "italic")
+    f_label = _card_font(38, "italic")
     f_big = _card_font(210, "bold")
     f_cap = _card_font(30)
-    f_small = _card_font(40)
-    f_flavor = _card_font(28, "italic")
-    f_foot = _card_font(20)
 
-    # masthead: brand + tagline left, period right
-    d.text((MARGIN, 78), "lock tf in", font=f_brand, fill=GOLD)
-    d.text((MARGIN, 140), "est. black mesa research facility.", font=f_tag, fill=DIM)
     if label:
-        d.text((W - MARGIN, 142), label, font=f_tag, fill=DIM, anchor="ra")
+        d.text((W / 2, H / 2 - 250), label, font=f_label, fill=DIM, anchor="mm")
 
     # the number
     size = 210
     while size > 90 and d.textlength(big, font=f_big) > W - 2 * MARGIN:
         size -= 10
         f_big = _card_font(size, "bold")
-    d.text((W / 2, H / 2 - 80), big, font=f_big, fill=HI, anchor="mm")
-    d.text((W / 2, H / 2 + 90), " ".join("focused"), font=f_cap, fill=DIM, anchor="mm")
-
-    # stats: gold segments, dimmer middots
-    segs = []
-    for i, part in enumerate(small_parts):
-        if i:
-            segs.append(("  ·  ", "#8a5a10"))
-        segs.append((part, GOLD))
-    total = sum(d.textlength(t, font=f_small) for t, _ in segs)
-    x = (W - total) / 2
-    for t, col in segs:
-        d.text((x, H / 2 + 185), t, font=f_small, fill=col)
-        x += d.textlength(t, font=f_small)
-
-    # half-life flavor line, re-rolled on every render
-    d.text((W / 2, H / 2 + 280), random.choice(HL_PHRASES), font=f_flavor,
-           fill="#8a6228", anchor="mm")
-
-    d.text((W / 2, H - 70), "lock in software · v1.0 · build 1998",
-           font=f_foot, fill="#6a4a10", anchor="mm")
+    d.text((W / 2, H / 2 - 10), big, font=f_big, fill=HI, anchor="mm")
+    d.text((W / 2, H / 2 + 160), " ".join("focused"), font=f_cap, fill=DIM, anchor="mm")
 
     buf = io.BytesIO()
     img.save(buf, "PNG")
@@ -898,29 +852,29 @@ MONTHS = ("january", "february", "march", "april", "may", "june",
 
 
 def card_png(conn) -> bytes:
-    """1080x1080 valve card: today's focused time, tasks done, top category."""
-    focused, tasks_done, top = _card_stats(
-        conn, "substr(started_at,1,10)=?", "substr(done_at,1,10)=?", today_str())
-    return _card_render(_hm(focused), _card_small(tasks_done, top),
-                        label=date.today().strftime("%d %b %Y").lower())
+    """1080x1080 valve card: today's focused time."""
+    focused = _card_focused(conn, "substr(started_at,1,10)=?", today_str())
+    return _card_render(_hm(focused), label=date.today().strftime("%d %b %Y").lower())
 
 
 def card_png_week(conn) -> bytes:
     """1080x1080 valve card: rolling last 7 days."""
     since = (date.today() - timedelta(days=6)).isoformat()
-    focused, tasks_done, top = _card_stats(
-        conn, "substr(started_at,1,10)>=?", "substr(done_at,1,10)>=?", since)
-    return _card_render(_hm(focused), _card_small(tasks_done, top), label="last 7 days")
+    focused = _card_focused(conn, "substr(started_at,1,10)>=?", since)
+    return _card_render(_hm(focused), label="last 7 days")
 
 
-def card_png_month(conn) -> bytes:
-    """1080x1080 valve card: named calendar month, month-to-date."""
+def card_png_month(conn, year=None, month=None) -> bytes:
+    """1080x1080 valve card: a calendar month, month-to-date."""
     now = date.today()
-    focused, tasks_done, top = _card_stats(
-        conn, "substr(started_at,1,7)=?", "substr(done_at,1,7)=?",
-        f"{now.year:04d}-{now.month:02d}")
-    return _card_render(_hm(focused), _card_small(tasks_done, top),
-                        label=f"{MONTHS[now.month - 1]} {now.year}")
+    try:
+        y, m = int(year), int(month)
+        if not (1 <= m <= 12 and 1990 <= y <= 2100):
+            raise ValueError
+    except (TypeError, ValueError):
+        y, m = now.year, now.month
+    focused = _card_focused(conn, "substr(started_at,1,7)=?", f"{y:04d}-{m:02d}")
+    return _card_render(_hm(focused), label=f"{MONTHS[m - 1]} {y}")
 
 
 # ---------------------------------------------------------------- embedded webfonts
@@ -1523,7 +1477,7 @@ MANAGE = """<!doctype html>
     <div class="bars" id="ch-weeks"></div>
     <div class="ctitle" style="margin-top:22px">monthly</div>
     <div id="ch-months"></div>
-    <div class="statline" style="margin:26px 0 4px">export: <a href="/card.png" target="_blank">today</a> &middot; <a href="/card-week.png" target="_blank">week</a> &middot; <a href="/card-month.png" target="_blank">month</a> &mdash; retro: <a href="/card.png?style=retro" target="_blank">today</a> &middot; <a href="/card-week.png?style=retro" target="_blank">week</a> &middot; <a href="/card-month.png?style=retro" target="_blank">month</a></div>
+    <div class="statline" style="margin:26px 0 4px">export: <a href="/card.png" target="_blank">today</a> &middot; <a href="/card-week.png" target="_blank">week</a> &middot; <a id="expmonthlink" href="/card-month.png" target="_blank">month</a> <select class="tinput" id="expmonth" style="margin-left:8px"></select></div>
   </div>
 </div>
 
@@ -2401,6 +2355,24 @@ MANAGE = """<!doctype html>
   const HL_PHRASES = __HL_PHRASES__;
   $("hlwords").textContent = HL_PHRASES[Math.floor(Math.random() * HL_PHRASES.length)];
 
+  // ---------- month export picker
+  fetch("/api/months").then(r => r.json()).then(months => {
+    const MN = ["january", "february", "march", "april", "may", "june",
+                "july", "august", "september", "october", "november", "december"];
+    const sel = $("expmonth"), link = $("expmonthlink");
+    if (!sel || !link) return;
+    const now = new Date();
+    const cur = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+    if (!months.includes(cur)) months.unshift(cur);
+    sel.innerHTML = months.map(m => {
+      const [y, mm] = m.split("-");
+      return `<option value="${m}"${m === cur ? " selected" : ""}>${MN[+mm - 1]} ${y}</option>`;
+    }).join("");
+    const sync = () => { link.href = "/card-month.png?month=" + sel.value; };
+    sel.addEventListener("change", sync);
+    sync();
+  }).catch(() => {});
+
   load();
   loadNote();
   startPomoPoll();
@@ -2458,7 +2430,9 @@ def make_handler(db_path: str):
                     elif path == "/card-week.png":
                         self._send(200, card_png_week(conn), "image/png")
                     else:
-                        self._send(200, card_png_month(conn), "image/png")
+                        mm = re.search(r"[?&]month=(\d{4})-(\d{2})", self.path)
+                        self._send(200, card_png_month(
+                            conn, mm and mm.group(1), mm and mm.group(2)), "image/png")
                 elif path == "/manage":
                     self._send(200, MANAGE.encode())
                 elif path == "/api/todo":
@@ -2488,6 +2462,14 @@ def make_handler(db_path: str):
                     })
                 elif path == "/api/pomodoro/summary":
                     self._json(200, pomo_summary(conn))
+                elif path == "/api/months":
+                    months = [r["m"] for r in conn.execute(
+                        "SELECT DISTINCT substr(started_at,1,7) AS m FROM pomo_periods "
+                        "WHERE m IS NOT NULL ORDER BY m DESC")]
+                    cur = date.today().strftime("%Y-%m")
+                    if cur not in months:
+                        months.insert(0, cur)
+                    self._json(200, months)
                 elif path == "/api/categories":
                     cats = []
                     for c in conn.execute(
