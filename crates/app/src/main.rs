@@ -125,6 +125,14 @@ fn app_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
+    // Always-on-top is a no-op under GNOME Wayland. XWayland supports it,
+    // so use X11 when a display is available; LOCKIN_WAYLAND=1 opts back in.
+    if std::env::var_os("DISPLAY").is_some()
+        && std::env::var("LOCKIN_WAYLAND").ok().as_deref() != Some("1")
+    {
+        std::env::remove_var("WAYLAND_DISPLAY");
+    }
+
     let (db_arg, quit_existing, reset_window) = parse_args();
     let db_path = resolve_db(db_arg);
 
@@ -159,10 +167,17 @@ fn main() -> eframe::Result {
         .unwrap_or(780.0)
         .max(1.0);
 
+    let always_on_top =
+        lockin_core::read_setting(&db_path, "ui_always_on_top").as_deref() == Some("1");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("LOCK IN")
             .with_inner_size([win_w, win_h])
+            .with_window_level(if always_on_top {
+                egui::WindowLevel::AlwaysOnTop
+            } else {
+                egui::WindowLevel::Normal
+            })
             .with_resizable(true)
             .with_maximized(false)
             .with_decorations(false)

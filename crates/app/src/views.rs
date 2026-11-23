@@ -1269,6 +1269,30 @@ impl App {
         });
         let (cw, ch) = self.native_window_size(ui.ctx());
         ui.label(theme::i(format!("current: {cw} × {ch}"), 11.0).color(theme::DIM));
+        ui.add_space(8.0);
+        let top = ui.checkbox(&mut self.always_on_top, "always on top");
+        if top.changed() {
+            let on = self.always_on_top;
+            let _ = self
+                .db
+                .set_setting("ui_always_on_top", if on { "1" } else { "0" });
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::WindowLevel(if on {
+                    egui::WindowLevel::AlwaysOnTop
+                } else {
+                    egui::WindowLevel::Normal
+                }));
+            self.settings_msg = Some((
+                if on {
+                    "always on top enabled".into()
+                } else {
+                    "always on top disabled".into()
+                },
+                true,
+                std::time::Instant::now(),
+            ));
+        }
+        ui.label(theme::i("keeps the window above other apps", 11.0).color(theme::DIM));
 
         ui.add_space(24.0);
         ui.label(theme::b("zoom", 13.0).color(theme::GOLD));

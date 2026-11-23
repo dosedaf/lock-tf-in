@@ -119,6 +119,8 @@ pub struct App {
     pub pending_window: (u32, u32),
     pub window_save_at: Option<Instant>,
     pub window_started_at: Instant,
+    pub always_on_top: bool,
+    pub window_level_applied: bool,
     pub drag_group: Option<i64>,
     pub drag_group_target: Option<i64>,
     pub drag_subject: Option<(i64, i64)>,
@@ -161,6 +163,7 @@ impl App {
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(780)
             .clamp(620, 3000);
+        let always_on_top = db.get_setting_or("ui_always_on_top", "0") == "1";
         let zoom: f32 = db
             .get_setting("ui_zoom")
             .and_then(|s| s.parse::<f32>().ok())
@@ -252,6 +255,8 @@ impl App {
             pending_window: (saved_w, saved_h),
             window_save_at: None,
             window_started_at: Instant::now(),
+            always_on_top,
+            window_level_applied: false,
             drag_group: None,
             drag_group_target: None,
             drag_subject: None,
@@ -386,6 +391,14 @@ impl App {
         if !self.hidden {
             self.hotkeys(ctx);
             self.resize_edges(ctx);
+        }
+        if !self.window_level_applied {
+            ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(if self.always_on_top {
+                egui::WindowLevel::AlwaysOnTop
+            } else {
+                egui::WindowLevel::Normal
+            }));
+            self.window_level_applied = true;
         }
 
         if self.last_pomo_fetch.elapsed() >= Duration::from_millis(700) {
