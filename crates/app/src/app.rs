@@ -103,6 +103,7 @@ pub struct App {
     pub trk_name: String,
     pub trk_url: String,
     pub trk_notes: String,
+    pub trk_set: String,
 
     pub dialog: Option<Dialog>,
     pub hidden: bool,
@@ -243,6 +244,7 @@ impl App {
             trk_name: String::new(),
             trk_url: String::new(),
             trk_notes: String::new(),
+            trk_set: String::new(),
             dialog: None,
             hidden: false,
             quitting: false,

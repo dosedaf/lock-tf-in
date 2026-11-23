@@ -945,6 +945,7 @@ impl App {
                 self.trk_name = subject.name.clone();
                 self.trk_url = subject.url.clone();
                 self.trk_notes = subject.notes.clone();
+                self.trk_set.clear();
             }
         }
         if name_resp.hovered() {
@@ -1070,6 +1071,48 @@ impl App {
                         .desired_rows(2)
                         .font(theme::regular_font(13.0)),
                 );
+                let unit = if let Some(total) = subject.unit_total {
+                    format!(
+                        "{:.0} / {:.0} {}",
+                        subject.unit_done, total, subject.unit_label
+                    )
+                } else {
+                    format!("{:.0} {}", subject.unit_done, subject.unit_label)
+                };
+                ui.horizontal(|ui| {
+                    ui.label(theme::i("progress", 12.0).color(theme::MUTED));
+                    ui.label(theme::t(&unit, 12.5).color(theme::BRIGHT));
+                    if theme::link(ui, "-1", 12.0, theme::RED).clicked() {
+                        let _ = self.db.subject_progress(subject.id, Some(-1.0), None, "");
+                        self.reload_tracker();
+                    }
+                    if theme::link(ui, "+1", 12.0, theme::RED).clicked() {
+                        let _ = self.db.subject_progress(subject.id, Some(1.0), None, "");
+                        self.reload_tracker();
+                    }
+                    if theme::link(ui, "+10", 12.0, theme::RED).clicked() {
+                        let _ = self.db.subject_progress(subject.id, Some(10.0), None, "");
+                        self.reload_tracker();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        [72.0, 24.0],
+                        egui::TextEdit::singleline(&mut self.trk_set)
+                            .hint_text("set...")
+                            .font(theme::regular_font(12.0)),
+                    );
+                    if theme::link(ui, "set", 12.0, theme::RED).clicked() {
+                        if let Ok(value) = self.trk_set.trim().parse::<f64>() {
+                            let _ = self
+                                .db
+                                .subject_progress(subject.id, None, Some(value), "ui");
+                            self.trk_set.clear();
+                            self.reload_tracker();
+                        }
+                    }
+                    ui.label(theme::i("absolute value", 10.5).color(theme::DIM));
+                });
                 ui.horizontal(|ui| {
                     if theme::link(ui, "save", 13.0, theme::RED).clicked() {
                         let name = self.trk_name.trim().to_string();
