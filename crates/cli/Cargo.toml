@@ -1,0 +1,15 @@
+[package]
+name = "lockinctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lockinctl"
+path = "src/main.rs"
+
+[dependencies]
+lockin-core = { path = "../core" }
+anyhow.workspace = true
+chrono.workspace = true
+libc = "0.2"

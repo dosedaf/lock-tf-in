@@ -188,6 +188,8 @@ pub struct App {
     pub pending_window: (u32, u32),
     pub window_save_at: Option<Instant>,
     pub window_started_at: Instant,
+    pub last_tasks_refresh: Instant,
+    pub last_view_refresh: Instant,
     pub always_on_top: bool,
     pub window_level_applied: bool,
     pub settings_opened_frame: u64,
@@ -345,6 +347,8 @@ impl App {
             pending_window: (saved_w, saved_h),
             window_save_at: None,
             window_started_at: Instant::now(),
+            last_tasks_refresh: Instant::now(),
+            last_view_refresh: Instant::now(),
             always_on_top,
             window_level_applied: false,
             settings_opened_frame: 0,
@@ -897,6 +901,19 @@ impl App {
         }
         self.persist_note();
         self.track_window(ctx);
+        if self.last_tasks_refresh.elapsed() >= Duration::from_millis(1200) {
+            self.reload_tasks();
+            self.last_tasks_refresh = Instant::now();
+        }
+        if self.last_view_refresh.elapsed() >= Duration::from_millis(2000) {
+            match self.view {
+                View::Tracker => self.reload_tracker(),
+                View::Summary => self.reload_summary(),
+                View::Log if self.periods_loaded => self.reload_periods(),
+                _ => {}
+            }
+            self.last_view_refresh = Instant::now();
+        }
 
         if self.pomo.running || self.note_dirty {
             ctx.request_repaint_after(Duration::from_millis(250));
