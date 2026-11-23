@@ -10,6 +10,9 @@ use lockin_core::{Category, Db, PomoView, Task};
 use crate::theme;
 use crate::views;
 
+pub static QUIT_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Tasks,
@@ -327,7 +330,7 @@ impl App {
 
     pub fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if ctx.input(|i| i.viewport().close_requested()) {
-            if self.quitting {
+            if self.quitting || QUIT_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = std::fs::remove_file(crate::socket_path());
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);

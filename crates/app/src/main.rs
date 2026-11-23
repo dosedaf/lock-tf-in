@@ -78,6 +78,7 @@ fn listen_single_instance(ctx: &egui::Context) {
             let mut stream = stream;
             let n = stream.read(&mut buf).unwrap_or(0);
             if &buf[..n] == b"quit" {
+                app::QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::Relaxed);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
