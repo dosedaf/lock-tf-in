@@ -51,6 +51,24 @@ pub enum UndoAction {
     GroupOrder(Vec<i64>),
 }
 
+#[derive(Clone)]
+pub enum PaletteAction {
+    Switch(View),
+    AddTask,
+    ToggleTimer,
+    ToggleTop,
+    EditTask(i64),
+    EditSubject(i64),
+    LogTime,
+}
+
+#[derive(Clone)]
+pub struct PaletteItem {
+    pub label: String,
+    pub hint: String,
+    pub action: PaletteAction,
+}
+
 pub struct Toast {
     pub text: String,
     pub at: Instant,
@@ -169,6 +187,10 @@ pub struct App {
     pub always_on_top: bool,
     pub window_level_applied: bool,
     pub settings_opened_frame: u64,
+    pub palette_open: bool,
+    pub palette_query: String,
+    pub palette_index: usize,
+    pub palette_focus: bool,
     pub drag_group: Option<i64>,
     pub drag_group_target: Option<i64>,
     pub drag_subject: Option<(i64, i64)>,
@@ -318,6 +340,10 @@ impl App {
             always_on_top,
             window_level_applied: false,
             settings_opened_frame: 0,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_index: 0,
+            palette_focus: false,
             drag_group: None,
             drag_group_target: None,
             drag_subject: None,
@@ -335,6 +361,10 @@ impl App {
                 "group name (e.g. stream processing)",
                 "",
             );
+        }
+        if std::env::var("LOCKIN_PALETTE").ok().as_deref() == Some("1") {
+            app.palette_open = true;
+            app.palette_focus = true;
         }
         if std::env::var("LOCKIN_LOG_OPEN").ok().as_deref() == Some("periods") {
             app.periods_open = true;
@@ -531,6 +561,260 @@ impl App {
             }
         }
         self.toast("undone");
+    }
+
+    fn toggle_palette(&mut self) {
+        self.palette_open = !self.palette_open;
+        self.palette_query.clear();
+        self.palette_index = 0;
+        self.palette_focus = self.palette_open;
+    }
+
+    fn palette_items(&self) -> Vec<PaletteItem> {
+        let mut items = vec![
+            PaletteItem {
+                label: "tasks".into(),
+                hint: "view".into(),
+                action: PaletteAction::Switch(View::Tasks),
+            },
+            PaletteItem {
+                label: "tracker".into(),
+                hint: "view".into(),
+                action: PaletteAction::Switch(View::Tracker),
+            },
+            PaletteItem {
+                label: "timer".into(),
+                hint: "view".into(),
+                action: PaletteAction::Switch(View::Timer),
+            },
+            PaletteItem {
+                label: "summary".into(),
+                hint: "view".into(),
+                action: PaletteAction::Switch(View::Summary),
+            },
+            PaletteItem {
+                label: "log".into(),
+                hint: "view".into(),
+                action: PaletteAction::Switch(View::Log),
+            },
+            PaletteItem {
+                label: "settings".into(),
+                hint: "view".into(),
+                action: PaletteAction::Switch(View::Settings),
+            },
+            PaletteItem {
+                label: "add task".into(),
+                hint: "tasks".into(),
+                action: PaletteAction::AddTask,
+            },
+            PaletteItem {
+                label: "toggle timer".into(),
+                hint: "start / pause".into(),
+                action: PaletteAction::ToggleTimer,
+            },
+            PaletteItem {
+                label: "log time".into(),
+                hint: "manual entry".into(),
+                action: PaletteAction::LogTime,
+            },
+            PaletteItem {
+                label: format!(
+                    "always on top: {}",
+                    if self.always_on_top { "on" } else { "off" }
+                ),
+                hint: "window".into(),
+                action: PaletteAction::ToggleTop,
+            },
+        ];
+        for t in self.tasks.iter().take(80) {
+            items.push(PaletteItem {
+                label: format!("task · {}", t.text),
+                hint: "edit".into(),
+                action: PaletteAction::EditTask(t.id),
+            });
+        }
+        for (id, name, group) in self.subjects.iter().take(80) {
+            items.push(PaletteItem {
+                label: format!("subject · {name}"),
+                hint: group.clone(),
+                action: PaletteAction::EditSubject(*id),
+            });
+        }
+        items
+    }
+
+    fn run_palette_action(&mut self, ctx: &egui::Context, action: PaletteAction) {
+        match action {
+            PaletteAction::Switch(view) => self.set_view(view),
+            PaletteAction::AddTask => {
+                self.set_view(View::Tasks);
+                self.add_open = true;
+                self.add_focus = true;
+                self.add_text.clear();
+            }
+            PaletteAction::ToggleTimer => {
+                let action = if self.pomo.running {
+                    lockin_core::PomoAction::Pause
+                } else {
+                    lockin_core::PomoAction::Start
+                };
+                let _ = self.db.pomo_action(action);
+                self.reload_timer();
+                self.reload_tasks();
+            }
+            PaletteAction::ToggleTop => {
+                self.always_on_top = !self.always_on_top;
+                let _ = self.db.set_setting(
+                    "ui_always_on_top",
+                    if self.always_on_top { "1" } else { "0" },
+                );
+                self.set_top_level(ctx);
+                self.toast(if self.always_on_top {
+                    "always on top enabled"
+                } else {
+                    "always on top disabled"
+                });
+            }
+            PaletteAction::EditTask(id) => {
+                self.set_view(View::Tasks);
+                if let Some(task) = self.tasks.iter().find(|t| t.id == id).cloned() {
+                    self.open_editor(&task);
+                }
+            }
+            PaletteAction::EditSubject(id) => {
+                self.set_view(View::Tracker);
+                if let Some(subject) = self.tracker.as_ref().and_then(|t| {
+                    t.groups
+                        .iter()
+                        .flat_map(|g| g.subjects.iter())
+                        .find(|s| s.id == id)
+                        .cloned()
+                }) {
+                    self.tracker_editor = Some(id);
+                    self.trk_name = subject.name;
+                    self.trk_url = subject.url;
+                    self.trk_notes = subject.notes;
+                    self.trk_set.clear();
+                }
+            }
+            PaletteAction::LogTime => {
+                self.set_view(View::Log);
+                self.reload_periods();
+            }
+        }
+        self.palette_open = false;
+    }
+
+    fn palette_window(&mut self, ctx: &egui::Context) {
+        if !self.palette_open {
+            return;
+        }
+        let mut execute: Option<PaletteAction> = None;
+        let mut close = false;
+        let items = self.palette_items();
+        let query = self.palette_query.to_lowercase();
+        let filtered: Vec<&PaletteItem> = items
+            .iter()
+            .filter(|i| {
+                query.is_empty()
+                    || i.label.to_lowercase().contains(&query)
+                    || i.hint.to_lowercase().contains(&query)
+            })
+            .take(60)
+            .collect();
+        if filtered.is_empty() {
+            self.palette_index = 0;
+        } else if self.palette_index >= filtered.len() {
+            self.palette_index = filtered.len() - 1;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+            if !filtered.is_empty() {
+                self.palette_index = (self.palette_index + 1) % filtered.len();
+            }
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+            if !filtered.is_empty() {
+                self.palette_index = (self.palette_index + filtered.len() - 1) % filtered.len();
+            }
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+            if let Some(item) = filtered.get(self.palette_index) {
+                execute = Some(item.action.clone());
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            close = true;
+        }
+
+        let selected = self.palette_index;
+        let focus = self.palette_focus;
+        egui::Area::new(egui::Id::new("palette"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 70.0])
+            .fade_in(false)
+            .show(ctx, |ui| {
+                theme::textured_panel(
+                    ui,
+                    self.ceramic.id(),
+                    Some(520.0),
+                    egui::Margin::symmetric(12, 10),
+                    |ui| {
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut self.palette_query)
+                                .hint_text("type a command or search…")
+                                .desired_width(f32::INFINITY)
+                                .font(theme::regular_font(13.0)),
+                        );
+                        if focus {
+                            edit.request_focus();
+                            self.palette_focus = false;
+                        }
+                        ui.add_space(6.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(280.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                for (idx, item) in filtered.iter().enumerate() {
+                                    let is_selected = idx == selected;
+                                    let text = if item.hint.is_empty() {
+                                        item.label.clone()
+                                    } else {
+                                        format!("{}   ·   {}", item.label, item.hint)
+                                    };
+                                    let resp = ui.selectable_label(
+                                        is_selected,
+                                        theme::t(text, 12.5).color(if is_selected {
+                                            theme::BRIGHT
+                                        } else {
+                                            theme::GOLD
+                                        }),
+                                    );
+                                    if resp.clicked() {
+                                        execute = Some(item.action.clone());
+                                    }
+                                }
+                            });
+                        ui.add_space(4.0);
+                        ui.label(
+                            theme::i("↑ ↓ select · enter run · esc close", 10.5).color(theme::DIM),
+                        );
+                    },
+                );
+            });
+        if let Some(action) = execute {
+            self.run_palette_action(ctx, action);
+        }
+        if close {
+            self.palette_open = false;
+        }
+    }
+
+    fn set_top_level(&self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(if self.always_on_top {
+            egui::WindowLevel::AlwaysOnTop
+        } else {
+            egui::WindowLevel::Normal
+        }));
     }
 
     fn toast_window(&mut self, ctx: &egui::Context) {
@@ -749,6 +1033,7 @@ impl App {
             self.settings_popup(ctx);
         }
         self.dialog_window(ctx);
+        self.palette_window(ctx);
         self.toast_window(ctx);
         self.maybe_screenshot(ctx);
     }
@@ -784,6 +1069,10 @@ impl App {
     }
 
     fn hotkeys(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::K)) {
+            self.toggle_palette();
+            return;
+        }
         let typing = ctx.wants_keyboard_input();
         if ctx.input(|i| i.modifiers.ctrl) {
             if ctx.input(|i| i.key_pressed(egui::Key::Num1)) {
