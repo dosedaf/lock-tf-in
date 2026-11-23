@@ -177,8 +177,8 @@ impl Db {
                 &p_ended,
             )?;
         }
-        notify_phase(&st.phase);
         let auto = self.pomo_config().auto_next;
+        notify_phase(&st.phase, &self.path, !auto);
         let next = if st.phase == "focus" {
             "break"
         } else {
@@ -379,20 +379,48 @@ impl Db {
     }
 }
 
-pub fn notify_phase(phase: &str) {
+pub fn notify_phase(phase: &str, db_path: &std::path::Path, offer_start: bool) {
     let msg = if phase == "focus" {
         "focus done"
     } else {
         "break over"
     };
-    let _ = std::process::Command::new("notify-send")
-        .args(["-a", "grind", "grind", msg])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
     let _ = std::process::Command::new("canberra-gtk-play")
         .args(["-i", "dialog-information"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+
+    let mut notification = notify_rust::Notification::new();
+    notification
+        .summary("grind")
+        .body(msg)
+        .appname("grind")
+        .timeout(notify_rust::Timeout::Milliseconds(20000));
+    if offer_start {
+        notification.action("start", "start next");
+    }
+    match notification.show() {
+        Ok(handle) => {
+            if offer_start {
+                let path = db_path.to_path_buf();
+                std::thread::spawn(move || {
+                    handle.wait_for_action(|action| {
+                        if action == "start" {
+                            if let Ok(db) = Db::open(&path) {
+                                let _ = db.pomo_action(PomoAction::Start);
+                            }
+                        }
+                    });
+                });
+            }
+        }
+        Err(_) => {
+            let _ = std::process::Command::new("notify-send")
+                .args(["-a", "grind", "grind", msg])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+    }
 }
