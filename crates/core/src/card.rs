@@ -116,7 +116,15 @@ fn render(big: &str, label: &str) -> Result<Vec<u8>> {
 
     let cx = W as f32 / 2.0;
     if !label.is_empty() {
-        draw_text_centered(&mut img, &f_label, label, 38.0, cx, H as f32 / 2.0 - 250.0, DIM);
+        draw_text_centered(
+            &mut img,
+            &f_label,
+            label,
+            38.0,
+            cx,
+            H as f32 / 2.0 - 250.0,
+            DIM,
+        );
     }
 
     let mut size = 210.0f32;
@@ -141,8 +149,18 @@ fn render(big: &str, label: &str) -> Result<Vec<u8>> {
 }
 
 const MONTHS: [&str; 12] = [
-    "january", "february", "march", "april", "may", "june", "july", "august", "september",
-    "october", "november", "december",
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
 ];
 
 impl Db {
@@ -162,9 +180,7 @@ impl Db {
                 )
             }
             CardKind::Week => {
-                let since = (today - Duration::days(6))
-                    .format("%Y-%m-%d")
-                    .to_string();
+                let since = (today - Duration::days(6)).format("%Y-%m-%d").to_string();
                 let focused: i64 = self.conn.query_row(
                     "SELECT COALESCE(SUM(minutes),0) FROM pomo_periods WHERE substr(started_at,1,10)>=?",
                     [&since],

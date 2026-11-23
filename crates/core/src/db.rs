@@ -118,9 +118,7 @@ impl Db {
 
     fn migrate(&self) -> Result<()> {
         let has_col = |table: &str, col: &str| -> Result<bool> {
-            let mut stmt = self
-                .conn
-                .prepare(&format!("PRAGMA table_info({table})"))?;
+            let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({table})"))?;
             let mut rows = stmt.query([])?;
             let mut found = false;
             while let Some(row) = rows.next()? {
@@ -197,11 +195,11 @@ impl Db {
     }
 
     pub fn create_day(&self, label: Option<&str>) -> Result<i64> {
-        let pos: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(position),0)+1 FROM days",
-            [],
-            |r| r.get(0),
-        )?;
+        let pos: i64 =
+            self.conn
+                .query_row("SELECT COALESCE(MAX(position),0)+1 FROM days", [], |r| {
+                    r.get(0)
+                })?;
         let label = label
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("Day {pos}"));
@@ -222,9 +220,11 @@ impl Db {
 
     pub fn get_setting(&self, key: &str) -> Option<String> {
         self.conn
-            .query_row("SELECT value FROM settings WHERE key=?", params![key], |r| {
-                r.get::<_, String>(0)
-            })
+            .query_row(
+                "SELECT value FROM settings WHERE key=?",
+                params![key],
+                |r| r.get::<_, String>(0),
+            )
             .optional()
             .ok()
             .flatten()
@@ -281,11 +281,11 @@ impl Db {
     pub fn add_task(&self, text: &str, details: &str) -> Result<i64> {
         let text = text.trim();
         anyhow::ensure!(!text.is_empty(), "text required");
-        let pos: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(position),0)+1 FROM tasks",
-            [],
-            |r| r.get(0),
-        )?;
+        let pos: i64 =
+            self.conn
+                .query_row("SELECT COALESCE(MAX(position),0)+1 FROM tasks", [], |r| {
+                    r.get(0)
+                })?;
         self.conn.execute(
             "INSERT INTO tasks (day_id, text, details, position) VALUES (?,?,?,?)",
             params![self.current_day_id(), text, details.trim(), pos],
@@ -357,11 +357,11 @@ impl Db {
         }
         let unique: std::collections::HashSet<_> = order.iter().collect();
         anyhow::ensure!(unique.len() == order.len(), "duplicate task ids");
-        let base: i64 = self.conn.query_row(
-            "SELECT COALESCE(MAX(position),0) FROM tasks",
-            [],
-            |r| r.get(0),
-        )?;
+        let base: i64 =
+            self.conn
+                .query_row("SELECT COALESCE(MAX(position),0) FROM tasks", [], |r| {
+                    r.get(0)
+                })?;
         let tx = self.conn.unchecked_transaction()?;
         for (n, id) in order.iter().enumerate() {
             let changed = tx.execute(
@@ -380,9 +380,11 @@ pub fn read_setting(path: &Path, key: &str) -> Option<String> {
         return None;
     }
     let conn = Connection::open(path).ok()?;
-    conn.query_row("SELECT value FROM settings WHERE key=?", params![key], |r| {
-        r.get::<_, String>(0)
-    })
+    conn.query_row(
+        "SELECT value FROM settings WHERE key=?",
+        params![key],
+        |r| r.get::<_, String>(0),
+    )
     .optional()
     .ok()
     .flatten()

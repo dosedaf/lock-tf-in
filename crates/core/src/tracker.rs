@@ -84,9 +84,7 @@ impl Db {
                 "SELECT subject_id, SUM(minutes) FROM pomo_periods \
                  WHERE subject_id IS NOT NULL GROUP BY subject_id",
             )?;
-            let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-            })?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
             for row in rows {
                 let (id, min) = row?;
                 focus.insert(id, min);
@@ -117,7 +115,8 @@ impl Db {
                     let mut s = srow?;
                     s.focused_min = focus.get(&s.id).copied().unwrap_or(0);
                     if let Some(last) = s.last_touched.as_deref() {
-                        if let Ok(d) = NaiveDate::parse_from_str(&last[..last.len().min(10)], "%Y-%m-%d")
+                        if let Ok(d) =
+                            NaiveDate::parse_from_str(&last[..last.len().min(10)], "%Y-%m-%d")
                         {
                             s.days_idle = Some((today - d).num_days());
                         }
@@ -194,9 +193,10 @@ impl Db {
     pub fn rename_group(&self, id: i64, name: &str) -> Result<()> {
         let name = name.trim();
         anyhow::ensure!(!name.is_empty(), "name cannot be empty");
-        let n = self
-            .conn
-            .execute("UPDATE tracker_groups SET name=? WHERE id=?", params![name, id])?;
+        let n = self.conn.execute(
+            "UPDATE tracker_groups SET name=? WHERE id=?",
+            params![name, id],
+        )?;
         if n == 0 {
             bail!("group not found");
         }
@@ -239,9 +239,11 @@ impl Db {
     ) -> Result<i64> {
         let exists = self
             .conn
-            .query_row("SELECT 1 FROM tracker_groups WHERE id=?", params![group_id], |r| {
-                r.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT 1 FROM tracker_groups WHERE id=?",
+                params![group_id],
+                |r| r.get::<_, i64>(0),
+            )
             .optional()?;
         if exists.is_none() {
             bail!("group not found");
@@ -263,7 +265,16 @@ impl Db {
             "INSERT INTO tracker_subjects \
              (group_id, name, kind, url, unit_total, unit_label, notes, position) \
              VALUES (?,?,?,?,?,?,?,?)",
-            params![group_id, name, kind, url.trim(), total, label, notes.trim(), pos],
+            params![
+                group_id,
+                name,
+                kind,
+                url.trim(),
+                total,
+                label,
+                notes.trim(),
+                pos
+            ],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -379,9 +390,11 @@ impl Db {
     ) -> Result<()> {
         let exists = self
             .conn
-            .query_row("SELECT 1 FROM tracker_subjects WHERE id=?", params![id], |r| {
-                r.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT 1 FROM tracker_subjects WHERE id=?",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
             .optional()?;
         if exists.is_none() {
             bail!("subject not found");
@@ -464,9 +477,11 @@ impl Db {
     ) -> Result<()> {
         let exists = self
             .conn
-            .query_row("SELECT 1 FROM tracker_subjects WHERE id=?", params![id], |r| {
-                r.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT 1 FROM tracker_subjects WHERE id=?",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
             .optional()?;
         if exists.is_none() {
             bail!("subject not found");

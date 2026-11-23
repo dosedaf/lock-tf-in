@@ -36,9 +36,11 @@ impl Db {
         anyhow::ensure!(!name.is_empty(), "name required");
         let exists = self
             .conn
-            .query_row("SELECT 1 FROM categories WHERE name=?", params![name], |r| {
-                r.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT 1 FROM categories WHERE name=?",
+                params![name],
+                |r| r.get::<_, i64>(0),
+            )
             .optional()?;
         if exists.is_some() {
             bail!("category already exists");

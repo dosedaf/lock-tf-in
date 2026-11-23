@@ -23,19 +23,6 @@ pub enum View {
     Settings,
 }
 
-impl View {
-    pub fn label(self) -> &'static str {
-        match self {
-            View::Tasks => "tasks",
-            View::Tracker => "tracker",
-            View::Timer => "timer",
-            View::Summary => "summary",
-            View::Log => "log",
-            View::Settings => "settings",
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct Dialog {
     pub title: String,
@@ -50,11 +37,10 @@ pub enum DialogKind {
     AddGroup,
     RenameGroup(i64),
     RenameCategory(i64),
-    AddSubject(i64),
     SnoozeDays(i64),
-    ConfirmDeleteGroup(i64, String, usize),
-    ConfirmDeleteSubject(i64, String),
-    ConfirmDeleteCategory(i64, String),
+    ConfirmDeleteGroup(i64),
+    ConfirmDeleteSubject(i64),
+    ConfirmDeleteCategory(i64),
 }
 
 pub struct App {
@@ -111,7 +97,6 @@ pub struct App {
     pub drag_target: Option<i64>,
     pub add_subject_group: Option<i64>,
     pub add_subject_text: String,
-    pub tracker_focus_edit: Option<String>,
     pub trk_name: String,
     pub trk_url: String,
     pub trk_notes: String,
@@ -146,8 +131,16 @@ impl App {
     pub fn new(ctx: &egui::Context, db_path: std::path::PathBuf) -> Self {
         let db = Db::open(&db_path).expect("open lockin database");
 
-        let ceramic = load_texture(ctx, "ceramic", include_bytes!("../../../assets/img/ceramic.gif"));
-        let arrow = load_texture(ctx, "arrow", include_bytes!("../../../assets/img/arrow.gif"));
+        let ceramic = load_texture(
+            ctx,
+            "ceramic",
+            include_bytes!("../../../assets/img/ceramic.gif"),
+        );
+        let arrow = load_texture(
+            ctx,
+            "arrow",
+            include_bytes!("../../../assets/img/arrow.gif"),
+        );
 
         let tasks = db.tasks().unwrap_or_default();
         let stats = db.todo_stats().unwrap_or((0, 0));
@@ -238,7 +231,6 @@ impl App {
             drag_target: None,
             add_subject_group: None,
             add_subject_text: String::new(),
-            tracker_focus_edit: None,
             trk_name: String::new(),
             trk_url: String::new(),
             trk_notes: String::new(),
@@ -271,7 +263,12 @@ impl App {
             frames: 0,
         };
         if std::env::var("LOCKIN_DIALOG").ok().as_deref() == Some("group") {
-            app.open_prompt(DialogKind::AddGroup, "add group", "group name (e.g. stream processing)", "");
+            app.open_prompt(
+                DialogKind::AddGroup,
+                "add group",
+                "group name (e.g. stream processing)",
+                "",
+            );
         }
         if std::env::var("LOCKIN_LOG_OPEN").ok().as_deref() == Some("periods") {
             app.periods_open = true;
@@ -337,9 +334,10 @@ impl App {
                 p.groups
                     .iter()
                     .flat_map(|g| {
-                        g.subjects.iter().filter(|s| s.state != "dropped").map(move |s| {
-                            (s.id, s.name.clone(), g.name.clone())
-                        })
+                        g.subjects
+                            .iter()
+                            .filter(|s| s.state != "dropped")
+                            .map(move |s| (s.id, s.name.clone(), g.name.clone()))
                     })
                     .collect()
             })
@@ -407,14 +405,11 @@ impl App {
         self.paint_background(ctx);
 
         egui::TopBottomPanel::top("chrome")
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
                 let full = ui.available_width();
-                let bar_rect = egui::Rect::from_min_size(
-                    ui.cursor().min,
-                    Vec2::new(full, 36.0),
-                );
+                let bar_rect = egui::Rect::from_min_size(ui.cursor().min, Vec2::new(full, 36.0));
                 ui.painter().rect_filled(
                     bar_rect,
                     0.0,
@@ -441,8 +436,7 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 10.0;
                         ui.label(theme::b("lock tf in", 16.0).color(theme::GOLD));
                         ui.label(
-                            theme::i("est. black mesa research facility.", 9.0)
-                                .color(theme::MUTED),
+                            theme::i("est. black mesa research facility.", 9.0).color(theme::MUTED),
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             self.window_controls(ui);
@@ -484,7 +478,7 @@ impl App {
             });
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
                 let full = ui.available_width();
@@ -555,7 +549,9 @@ impl App {
     }
 
     fn maybe_screenshot(&mut self, ctx: &egui::Context) {
-        let Some(path) = self.screenshot_path.clone() else { return };
+        let Some(path) = self.screenshot_path.clone() else {
+            return;
+        };
         if (2..=6).contains(&self.frames) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
         }
@@ -603,7 +599,9 @@ impl App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             } else if ctx.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::R)) {
                 self.reset_window(ctx);
-            } else if ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)) {
+            } else if ctx
+                .input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals))
+            {
                 self.set_zoom(ctx, self.zoom + 0.1);
             } else if ctx.input(|i| i.key_pressed(egui::Key::Minus)) {
                 self.set_zoom(ctx, self.zoom - 0.1);
@@ -650,9 +648,7 @@ impl App {
         let hi = h.round().max(1.0) as u32;
         self.settings_w = wi.to_string();
         self.settings_h = hi.to_string();
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::new(
-            w, h,
-        )));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::new(w, h)));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -672,7 +668,6 @@ impl App {
         ));
     }
 
-
     fn reset_window(&mut self, ctx: &egui::Context) {
         self.apply_window_size(ctx, 960.0, 780.0);
     }
@@ -691,11 +686,7 @@ impl App {
             return;
         }
         let size = self.native_window_size(ctx);
-        if size.0 == 0
-            || size.1 == 0
-            || size.0 > 5000
-            || size.1 > 4000
-        {
+        if size.0 == 0 || size.1 == 0 || size.0 > 5000 || size.1 > 4000 {
             return;
         }
         if size != self.pending_window {
@@ -723,21 +714,15 @@ impl App {
         }
         self.last_window = size;
         self.pending_window = size;
-        let _ = self
-            .db
-            .set_setting("ui_window_w", &size.0.to_string());
-        let _ = self
-            .db
-            .set_setting("ui_window_h", &size.1.to_string());
+        let _ = self.db.set_setting("ui_window_w", &size.0.to_string());
+        let _ = self.db.set_setting("ui_window_h", &size.1.to_string());
     }
 
     pub fn set_zoom(&mut self, ctx: &egui::Context, zoom: f32) {
         self.zoom = (zoom * 100.0).round() / 100.0;
         self.zoom = self.zoom.clamp(0.9, 2.0);
         ctx.set_zoom_factor(self.zoom);
-        let _ = self
-            .db
-            .set_setting("ui_zoom", &format!("{:.2}", self.zoom));
+        let _ = self.db.set_setting("ui_zoom", &format!("{:.2}", self.zoom));
         ctx.request_repaint();
     }
 
@@ -853,8 +838,6 @@ impl App {
         }
     }
 
-    fn navigation(&mut self, _ui: &mut Ui) {}
-
     pub fn section_title(ui: &mut Ui, left: &str, right: &str) {
         ui.horizontal(|ui| {
             ui.label(theme::b(left, 17.0).color(theme::GOLD));
@@ -882,9 +865,19 @@ impl App {
         if self.tasks.is_empty() {
             theme::empty_note(ui, "no tasks yet", 16.0);
         } else {
-            let open: Vec<Task> = self.tasks.iter().filter(|t| !t.is_done()).cloned().collect();
-            let done_tasks: Vec<Task> = self.tasks.iter().filter(|t| t.is_done()).cloned().collect();
-            let cap = if self.tasks_expanded { open.len() } else { open.len().min(4) };
+            let open: Vec<Task> = self
+                .tasks
+                .iter()
+                .filter(|t| !t.is_done())
+                .cloned()
+                .collect();
+            let done_tasks: Vec<Task> =
+                self.tasks.iter().filter(|t| t.is_done()).cloned().collect();
+            let cap = if self.tasks_expanded {
+                open.len()
+            } else {
+                open.len().min(4)
+            };
             ui.spacing_mut().item_spacing.y = 0.0;
             for task in open.iter().take(cap) {
                 self.task_row(ui, task);
@@ -896,11 +889,12 @@ impl App {
                 } else {
                     "show more (N hidden)"
                 };
-                let label = label.replace(
-                    "N",
-                    &(open.len() - 4).to_string(),
-                );
-                let caret = if self.tasks_expanded { theme::Caret::Down } else { theme::Caret::Right };
+                let label = label.replace("N", &(open.len() - 4).to_string());
+                let caret = if self.tasks_expanded {
+                    theme::Caret::Down
+                } else {
+                    theme::Caret::Right
+                };
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     if theme::caret_link(ui, &label, caret).clicked() {
@@ -911,7 +905,11 @@ impl App {
             if !done_tasks.is_empty() {
                 ui.add_space(6.0);
                 let label = format!("done ({})", done_tasks.len());
-                let caret = if self.done_collapsed { theme::Caret::Right } else { theme::Caret::Down };
+                let caret = if self.done_collapsed {
+                    theme::Caret::Right
+                } else {
+                    theme::Caret::Down
+                };
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
                     if theme::caret_link(ui, &label, caret).clicked() {
@@ -952,8 +950,13 @@ impl App {
         } else {
             ui.horizontal(|ui| {
                 ui.add_space(16.0);
-                let (rect, response) = ui.allocate_exact_size(Vec2::new(14.0, 18.0), Sense::click());
-                let color = if response.hovered() { theme::RED_HOT } else { theme::RED };
+                let (rect, response) =
+                    ui.allocate_exact_size(Vec2::new(14.0, 18.0), Sense::click());
+                let color = if response.hovered() {
+                    theme::RED_HOT
+                } else {
+                    theme::RED
+                };
                 theme::paint_plus(ui.painter(), rect.center(), 11.0, color);
                 if response.clicked() {
                     self.add_open = true;
@@ -969,9 +972,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(theme::b("day notes", 17.0).color(theme::GOLD));
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                ui.label(
-                    theme::i("lock the fuck in lil bitch", 11.0).color(theme::MUTED),
-                );
+                ui.label(theme::i("lock the fuck in lil bitch", 11.0).color(theme::MUTED));
             });
         });
         ui.add_space(13.0);
@@ -1021,21 +1022,25 @@ impl App {
         let width = ui.available_width();
         let indent = 16.0;
         let height = 20.0;
-        let (row_rect, row_response) = ui.allocate_exact_size(
-            Vec2::new(width, height),
-            Sense::click_and_drag(),
-        );
+        let (row_rect, row_response) =
+            ui.allocate_exact_size(Vec2::new(width, height), Sense::click_and_drag());
         let content = Rect::from_min_max(
             Pos2::new(row_rect.left() + indent, row_rect.top()),
             row_rect.right_bottom(),
         );
         let hovered = row_response.hovered();
         if hovered {
-            ui.painter()
-                .rect_filled(row_rect, 0.0, Color32::from_rgba_unmultiplied(215, 160, 90, 8));
+            ui.painter().rect_filled(
+                row_rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(215, 160, 90, 8),
+            );
         }
         if row_response.secondary_clicked() {
-            self.task_menu = Some((task.id, ui.ctx().pointer_latest_pos().unwrap_or(row_rect.center())));
+            self.task_menu = Some((
+                task.id,
+                ui.ctx().pointer_latest_pos().unwrap_or(row_rect.center()),
+            ));
         }
         if row_response.drag_started() {
             self.drag_task = Some(task.id);
@@ -1048,11 +1053,7 @@ impl App {
             Pos2::new(content.left(), content.top()),
             Vec2::new(12.0, height),
         );
-        let glyph_resp = ui.interact(
-            glyph_rect,
-            ui.id().with(("glyph", task.id)),
-            Sense::click(),
-        );
+        let glyph_resp = ui.interact(glyph_rect, ui.id().with(("glyph", task.id)), Sense::click());
         if task.state == "doing" {
             let image_rect = Rect::from_min_size(
                 Pos2::new(glyph_rect.left(), glyph_rect.center().y - 6.0),
@@ -1065,7 +1066,11 @@ impl App {
                 Color32::WHITE,
             );
         } else {
-            let color = if task.is_done() { theme::DIM } else { theme::GOLD };
+            let color = if task.is_done() {
+                theme::DIM
+            } else {
+                theme::GOLD
+            };
             let galley = ui.painter().layout_no_wrap(
                 "·".into(),
                 FontId::new(15.0, theme::regular_family()),
@@ -1102,11 +1107,9 @@ impl App {
         } else {
             (theme::GOLD, theme::regular_family())
         };
-        let galley = ui.painter().layout_no_wrap(
-            task.text.clone(),
-            FontId::new(13.0, family),
-            text_color,
-        );
+        let galley =
+            ui.painter()
+                .layout_no_wrap(task.text.clone(), FontId::new(13.0, family), text_color);
         let text_rect = Rect::from_min_size(
             Pos2::new(text_x, row_rect.top() + (height - galley.size().y) / 2.0),
             galley.size(),
@@ -1215,17 +1218,19 @@ impl App {
                         .font(theme::regular_font(13.0)),
                 );
                 ui.horizontal(|ui| {
-                    if theme::link(ui, "save", 13.0, theme::RED).clicked() {
-                        if self.db.patch_task(
-                            task.id,
-                            Some(&self.edit_text),
-                            Some(&self.edit_details),
-                            None,
-                        ).is_ok()
-                        {
-                            self.reload_tasks();
-                            self.edit_saved_until = Some(Instant::now());
-                        }
+                    if theme::link(ui, "save", 13.0, theme::RED).clicked()
+                        && self
+                            .db
+                            .patch_task(
+                                task.id,
+                                Some(&self.edit_text),
+                                Some(&self.edit_details),
+                                None,
+                            )
+                            .is_ok()
+                    {
+                        self.reload_tasks();
+                        self.edit_saved_until = Some(Instant::now());
                     }
                     if self
                         .edit_saved_until
@@ -1246,7 +1251,9 @@ impl App {
     }
 
     fn task_menu_window(&mut self, ctx: &egui::Context) {
-        let Some((id, pos)) = self.task_menu else { return };
+        let Some((id, pos)) = self.task_menu else {
+            return;
+        };
         let mut close = false;
         let mut new_state = None;
         let mut delete = false;
@@ -1293,7 +1300,9 @@ impl App {
     }
 
     fn tracker_menu_window(&mut self, ctx: &egui::Context) {
-        let Some((id, pos)) = self.tracker_menu else { return };
+        let Some((id, pos)) = self.tracker_menu else {
+            return;
+        };
         let subject = self.tracker.as_ref().and_then(|t| {
             t.groups
                 .iter()
@@ -1326,28 +1335,26 @@ impl App {
                             set_state = Some("doing");
                             close = true;
                         }
-                    } else if !matches!(subject.state.as_str(), "done" | "dropped") {
-                        if menu_item(ui, "on hold") {
-                            set_state = Some("paused");
-                            close = true;
-                        }
+                    } else if !matches!(subject.state.as_str(), "done" | "dropped")
+                        && menu_item(ui, "on hold")
+                    {
+                        set_state = Some("paused");
+                        close = true;
                     }
                     if subject.state == "dropped" {
                         if menu_item(ui, "restore") {
                             set_state = Some("todo");
                             close = true;
                         }
-                    } else if !matches!(subject.state.as_str(), "done" | "dropped") {
-                        if menu_item(ui, "drop this") {
-                            set_state = Some("dropped");
-                            close = true;
-                        }
+                    } else if !matches!(subject.state.as_str(), "done" | "dropped")
+                        && menu_item(ui, "drop this")
+                    {
+                        set_state = Some("dropped");
+                        close = true;
                     }
-                    if subject.snoozed {
-                        if menu_item(ui, "clear snooze") {
-                            clear_snooze = true;
-                            close = true;
-                        }
+                    if subject.snoozed && menu_item(ui, "clear snooze") {
+                        clear_snooze = true;
+                        close = true;
                     }
                     if menu_item(ui, "delete") {
                         delete = true;
@@ -1365,7 +1372,7 @@ impl App {
         }
         if delete {
             self.open_prompt(
-                DialogKind::ConfirmDeleteSubject(id, subject.name.clone()),
+                DialogKind::ConfirmDeleteSubject(id),
                 "delete subject",
                 &format!(
                     "delete \"{}\"? its progress log and focus-time link go too.",
@@ -1390,7 +1397,9 @@ impl App {
     }
 
     fn dialog_window(&mut self, ctx: &egui::Context) {
-        let Some(mut dialog) = self.dialog.take() else { return };
+        let Some(mut dialog) = self.dialog.take() else {
+            return;
+        };
         let confirm_only = matches!(
             dialog.kind,
             DialogKind::ConfirmDeleteGroup(..)
@@ -1409,44 +1418,45 @@ impl App {
                     Some(if confirm_only { 360.0 } else { 340.0 }),
                     egui::Margin::symmetric(16, 12),
                     |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(theme::b(dialog.title.clone(), 13.0).color(theme::BRIGHT));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if popup_close(ui) {
+                        ui.horizontal(|ui| {
+                            ui.label(theme::b(dialog.title.clone(), 13.0).color(theme::BRIGHT));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if popup_close(ui) {
+                                    action = Some(false);
+                                }
+                            });
+                        });
+                        ui.add_space(8.0);
+                        ui.label(theme::t(dialog.label.clone(), 12.5).color(theme::GOLD));
+                        if !confirm_only {
+                            let edit = ui.add(
+                                egui::TextEdit::singleline(&mut dialog.value)
+                                    .desired_width(f32::INFINITY)
+                                    .font(theme::regular_font(13.0)),
+                            );
+                            edit.request_focus();
+                            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                action = Some(true);
+                            }
+                        }
+                        if let Some(error) = &dialog.error {
+                            ui.label(theme::tc(error, 12.0, theme::RED_HOT));
+                        }
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            let yes = if confirm_only { "delete" } else { "ok" };
+                            if theme::bevel(ui, yes, true).clicked() {
+                                action = Some(true);
+                            }
+                            if theme::bevel(ui, "cancel", false).clicked() {
+                                action = Some(false);
+                            }
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                 action = Some(false);
                             }
                         });
-                    });
-                    ui.add_space(8.0);
-                    ui.label(theme::t(dialog.label.clone(), 12.5).color(theme::GOLD));
-                    if !confirm_only {
-                        let edit = ui.add(
-                            egui::TextEdit::singleline(&mut dialog.value)
-                                .desired_width(f32::INFINITY)
-                                .font(theme::regular_font(13.0)),
-                        );
-                        edit.request_focus();
-                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            action = Some(true);
-                        }
-                    }
-                    if let Some(error) = &dialog.error {
-                        ui.label(theme::tc(error, 12.0, theme::RED_HOT));
-                    }
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        let yes = if confirm_only { "delete" } else { "ok" };
-                        if theme::bevel(ui, yes, true).clicked() {
-                            action = Some(true);
-                        }
-                        if theme::bevel(ui, "cancel", false).clicked() {
-                            action = Some(false);
-                        }
-                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            action = Some(false);
-                        }
-                    });
-                });
+                    },
+                );
             });
 
         match action {
@@ -1482,28 +1492,23 @@ impl App {
                 self.db.rename_category(*id, &text)?;
                 self.reload_categories();
             }
-            DialogKind::AddSubject(group) => {
-                anyhow::ensure!(!text.is_empty(), "name required");
-                self.db.add_subject(*group, &text, "other", "", "", None)?;
-                self.reload_tracker();
-            }
             DialogKind::SnoozeDays(id) => {
                 let days: i64 = text.parse()?;
                 self.db.snooze_subject(*id, Some(days), None, "", false)?;
                 self.reload_tracker();
             }
-            DialogKind::ConfirmDeleteGroup(id, _, _) => {
+            DialogKind::ConfirmDeleteGroup(id) => {
                 self.db.delete_group(*id)?;
                 self.reload_tracker();
             }
-            DialogKind::ConfirmDeleteSubject(id, _) => {
+            DialogKind::ConfirmDeleteSubject(id) => {
                 self.db.delete_subject(*id)?;
                 self.reload_tracker();
                 if self.tracker_editor == Some(*id) {
                     self.tracker_editor = None;
                 }
             }
-            DialogKind::ConfirmDeleteCategory(id, _) => {
+            DialogKind::ConfirmDeleteCategory(id) => {
                 self.db.delete_category(*id)?;
                 self.reload_categories();
                 self.reload_timer();
@@ -1614,7 +1619,11 @@ pub fn menu_item(ui: &mut Ui, text: &str) -> bool {
         Vec2::new(ui.available_width(), galley.size().y + 6.0),
         Sense::click(),
     );
-    let color = if response.hovered() { theme::RED_HOT } else { theme::RED };
+    let color = if response.hovered() {
+        theme::RED_HOT
+    } else {
+        theme::RED
+    };
     if response.hovered() {
         ui.painter()
             .rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(215, 160, 90, 10));
@@ -1640,4 +1649,3 @@ impl eframe::App for App {
         App::update(self, ctx, frame);
     }
 }
-

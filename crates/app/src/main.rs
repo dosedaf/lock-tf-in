@@ -68,7 +68,11 @@ pub fn pid_path() -> PathBuf {
 fn hand_off(quit_existing: bool) -> bool {
     let path = socket_path();
     if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&path) {
-        let msg = if quit_existing { b"quit" as &[u8] } else { b"show" };
+        let msg = if quit_existing {
+            b"quit" as &[u8]
+        } else {
+            b"show"
+        };
         let _ = stream.write_all(msg);
         return true;
     }

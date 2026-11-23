@@ -44,7 +44,11 @@ impl App {
         };
         let blink = ui.input(|i| i.time * 3.2).sin() > -0.3;
         let clock_color = if ended {
-            if blink { theme::RED } else { theme::DIM }
+            if blink {
+                theme::RED
+            } else {
+                theme::DIM
+            }
         } else if running {
             theme::BRIGHT
         } else {
@@ -208,14 +212,19 @@ impl App {
         }
         if act.rename_category {
             if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
-                self.open_prompt(DialogKind::RenameCategory(id), "rename category", "name", &name);
+                self.open_prompt(
+                    DialogKind::RenameCategory(id),
+                    "rename category",
+                    "name",
+                    &name,
+                );
             }
         }
         if act.delete_category {
             if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
                 let label = format!("delete \"{name}\"? its focus periods become Unallocated.");
                 self.open_prompt(
-                    DialogKind::ConfirmDeleteCategory(id, name),
+                    DialogKind::ConfirmDeleteCategory(id),
                     "delete category",
                     &label,
                     "",
@@ -282,7 +291,10 @@ impl App {
             .width(combo_w)
             .selected_text(selected)
             .show_ui(ui, |ui| {
-                if ui.selectable_label(cur_cat.is_none(), "Unallocated").clicked() {
+                if ui
+                    .selectable_label(cur_cat.is_none(), "Unallocated")
+                    .clicked()
+                {
                     act.set_category = Some(None);
                 }
                 for (id, name) in &cats {
@@ -341,11 +353,21 @@ impl App {
         }
         ui.horizontal(|ui| {
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                let (rect, response) = ui.allocate_exact_size(egui::Vec2::new(16.0, 20.0), egui::Sense::click());
-                let color = if response.hovered() { theme::RED_HOT } else { theme::RED };
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::Vec2::new(16.0, 20.0), egui::Sense::click());
+                let color = if response.hovered() {
+                    theme::RED_HOT
+                } else {
+                    theme::RED
+                };
                 theme::paint_plus(ui.painter(), rect.center(), 11.0, color);
                 if response.clicked() {
-                    self.open_prompt(crate::app::DialogKind::AddGroup, "add group", "group name (e.g. stream processing)", "");
+                    self.open_prompt(
+                        crate::app::DialogKind::AddGroup,
+                        "add group",
+                        "group name (e.g. stream processing)",
+                        "",
+                    );
                 }
                 if response.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -360,7 +382,11 @@ impl App {
             .map(|t| t.groups.clone())
             .unwrap_or_default();
         if groups.is_empty() {
-            theme::empty_note(ui, "no groups yet, hit + to add one (e.g. stream processing)", 0.0);
+            theme::empty_note(
+                ui,
+                "no groups yet, hit + to add one (e.g. stream processing)",
+                0.0,
+            );
             return;
         }
         for group in groups {
@@ -414,7 +440,8 @@ impl App {
 
     fn tracker_group(&mut self, ui: &mut Ui, group: &lockin_core::TrackerGroup) {
         let width = ui.available_width();
-        let (row, response) = ui.allocate_exact_size(egui::Vec2::new(width, 22.0), egui::Sense::click_and_drag());
+        let (row, response) =
+            ui.allocate_exact_size(egui::Vec2::new(width, 22.0), egui::Sense::click_and_drag());
         let hovered = response.hovered();
         if response.drag_started() {
             self.drag_group = Some(group.id);
@@ -441,13 +468,21 @@ impl App {
         }
         let collapsed = !self.group_expanded.contains(&group.id);
         let caret_rect = egui::Rect::from_min_size(row.min, egui::Vec2::new(16.0, row.height()));
-        let caret_resp = ui.interact(caret_rect, ui.id().with(("gcaret", group.id)), egui::Sense::click());
+        let caret_resp = ui.interact(
+            caret_rect,
+            ui.id().with(("gcaret", group.id)),
+            egui::Sense::click(),
+        );
         theme::paint_caret(
             ui.painter(),
             caret_rect.center(),
             7.0,
             theme::MUTED,
-            if collapsed { theme::Caret::Right } else { theme::Caret::Down },
+            if collapsed {
+                theme::Caret::Right
+            } else {
+                theme::Caret::Down
+            },
         );
         if caret_resp.clicked() {
             if collapsed {
@@ -461,17 +496,21 @@ impl App {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
 
-        let name_galley = ui.painter().layout_no_wrap(
-            group.name.clone(),
-            theme::bold_font(14.0),
-            theme::GOLD,
-        );
+        let name_galley =
+            ui.painter()
+                .layout_no_wrap(group.name.clone(), theme::bold_font(14.0), theme::GOLD);
         let name_rect = egui::Rect::from_center_size(
-            egui::Pos2::new(row.left() + 16.0 + name_galley.size().x / 2.0, row.center().y),
+            egui::Pos2::new(
+                row.left() + 16.0 + name_galley.size().x / 2.0,
+                row.center().y,
+            ),
             name_galley.size() + egui::Vec2::new(2.0, 0.0),
         );
         ui.painter().galley(
-            egui::Pos2::new(name_rect.left(), row.center().y - name_galley.size().y / 2.0),
+            egui::Pos2::new(
+                name_rect.left(),
+                row.center().y - name_galley.size().y / 2.0,
+            ),
             name_galley.clone(),
             theme::GOLD,
         );
@@ -503,11 +542,9 @@ impl App {
             .map(|p| format!("{p}%"))
             .unwrap_or_else(|| "–".into());
         let meta = format!("{pct} · {}/{} done", group.done, group.count);
-        let meta_galley = ui.painter().layout_no_wrap(
-            meta,
-            theme::italic_font(11.0),
-            theme::MUTED,
-        );
+        let meta_galley = ui
+            .painter()
+            .layout_no_wrap(meta, theme::italic_font(11.0), theme::MUTED);
         ui.painter().galley(
             egui::Pos2::new(
                 name_rect.right() + 8.0,
@@ -521,21 +558,25 @@ impl App {
             egui::Pos2::new(row.right() - 10.0, row.center().y),
             egui::Vec2::new(11.0, 13.0),
         );
-        let trash_resp = ui.interact(trash_rect, ui.id().with(("gtrash", group.id)), egui::Sense::click());
+        let trash_resp = ui.interact(
+            trash_rect,
+            ui.id().with(("gtrash", group.id)),
+            egui::Sense::click(),
+        );
         if hovered || trash_resp.hovered() {
             theme::paint_trash(
                 ui.painter(),
                 trash_rect,
-                if trash_resp.hovered() { theme::RED_HOT } else { theme::MUTED },
+                if trash_resp.hovered() {
+                    theme::RED_HOT
+                } else {
+                    theme::MUTED
+                },
             );
         }
         if trash_resp.clicked() {
             self.open_prompt(
-                crate::app::DialogKind::ConfirmDeleteGroup(
-                    group.id,
-                    group.name.clone(),
-                    group.subjects.len(),
-                ),
+                crate::app::DialogKind::ConfirmDeleteGroup(group.id),
                 "delete group",
                 &format!(
                     "delete \"{}\" and its {} subject{}?",
@@ -589,7 +630,11 @@ impl App {
                 clicked = theme::caret_link(
                     ui,
                     &format!("on hold ({})", hold.len()),
-                    if self.hold_collapsed { theme::Caret::Right } else { theme::Caret::Down },
+                    if self.hold_collapsed {
+                        theme::Caret::Right
+                    } else {
+                        theme::Caret::Down
+                    },
                 )
                 .clicked();
             });
@@ -611,7 +656,11 @@ impl App {
                 clicked = theme::caret_link(
                     ui,
                     &format!("done ({})", done.len()),
-                    if self.done_collapsed_trk { theme::Caret::Right } else { theme::Caret::Down },
+                    if self.done_collapsed_trk {
+                        theme::Caret::Right
+                    } else {
+                        theme::Caret::Down
+                    },
                 )
                 .clicked();
             });
@@ -633,7 +682,11 @@ impl App {
                 clicked = theme::caret_link(
                     ui,
                     &format!("dropped ({})", dropped.len()),
-                    if self.drop_collapsed { theme::Caret::Right } else { theme::Caret::Down },
+                    if self.drop_collapsed {
+                        theme::Caret::Right
+                    } else {
+                        theme::Caret::Down
+                    },
                 )
                 .clicked();
             });
@@ -673,8 +726,13 @@ impl App {
         } else {
             ui.horizontal(|ui| {
                 ui.add_space(16.0);
-                let (rect, response) = ui.allocate_exact_size(egui::Vec2::new(14.0, 18.0), egui::Sense::click());
-                let color = if response.hovered() { theme::RED_HOT } else { theme::RED };
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::Vec2::new(14.0, 18.0), egui::Sense::click());
+                let color = if response.hovered() {
+                    theme::RED_HOT
+                } else {
+                    theme::RED
+                };
                 theme::paint_plus(ui.painter(), rect.center(), 11.0, color);
                 if response.clicked() {
                     self.add_subject_group = Some(group.id);
@@ -694,7 +752,11 @@ impl App {
             self.add_subject_group = None;
             return;
         }
-        if self.db.add_subject(group_id, &name, "other", "", "", None).is_ok() {
+        if self
+            .db
+            .add_subject(group_id, &name, "other", "", "", None)
+            .is_ok()
+        {
             self.add_subject_text.clear();
             self.add_subject_group = None;
             self.reload_tracker();
@@ -710,7 +772,10 @@ impl App {
         let width = ui.available_width();
         let indent = 7.0;
         let height = 20.0;
-        let (row, response) = ui.allocate_exact_size(egui::Vec2::new(width, height), egui::Sense::click_and_drag());
+        let (row, response) = ui.allocate_exact_size(
+            egui::Vec2::new(width, height),
+            egui::Sense::click_and_drag(),
+        );
         let hovered = response.hovered();
         if response.drag_started() {
             self.drag_subject = Some((group.id, subject.id));
@@ -722,7 +787,7 @@ impl App {
         }
         let dragging = self.drag_subject == Some((group.id, subject.id));
         let drop_target = self.drag_subject_target == Some(subject.id)
-            && self.drag_subject.map(|(gid, id)| (gid, id)) != Some((group.id, subject.id))
+            && self.drag_subject != Some((group.id, subject.id))
             && self.drag_subject.map(|(gid, _)| gid) == Some(group.id);
         if dragging || drop_target {
             ui.painter().rect_filled(
@@ -749,15 +814,23 @@ impl App {
             egui::Pos2::new(row.left() + indent + 7.0, row.center().y),
             egui::Vec2::new(14.0, 20.0),
         );
-        let star_resp = ui.interact(star_rect, ui.id().with(("star", subject.id)), egui::Sense::click());
-        let star_color = if subject.is_next {
-            theme::BRIGHT
-        } else if star_resp.hovered() {
+        let star_resp = ui.interact(
+            star_rect,
+            ui.id().with(("star", subject.id)),
+            egui::Sense::click(),
+        );
+        let star_color = if subject.is_next || star_resp.hovered() {
             theme::BRIGHT
         } else {
             theme::DIM
         };
-        theme::paint_star(ui.painter(), star_rect.center(), 5.0, subject.is_next, star_color);
+        theme::paint_star(
+            ui.painter(),
+            star_rect.center(),
+            5.0,
+            subject.is_next,
+            star_color,
+        );
         if star_resp.clicked() {
             let _ = self.db.tracker_set_next(subject.id, !subject.is_next);
             self.reload_tracker();
@@ -770,7 +843,11 @@ impl App {
             egui::Pos2::new(star_rect.right() + 8.0, row.top()),
             egui::Vec2::new(12.0, height),
         );
-        let glyph_resp = ui.interact(glyph_rect, ui.id().with(("sglyph", subject.id)), egui::Sense::click());
+        let glyph_resp = ui.interact(
+            glyph_rect,
+            ui.id().with(("sglyph", subject.id)),
+            egui::Sense::click(),
+        );
         if subject.state == "doing" {
             ui.painter().image(
                 self.arrow.id(),
@@ -787,9 +864,14 @@ impl App {
                 "paused" => theme::MUTED,
                 _ => theme::GOLD,
             };
-            let galley = ui.painter().layout_no_wrap("·".into(), theme::regular_font(15.0), color);
+            let galley = ui
+                .painter()
+                .layout_no_wrap("·".into(), theme::regular_font(15.0), color);
             ui.painter().galley(
-                egui::Pos2::new(glyph_rect.center().x - galley.size().x / 2.0, row.center().y - galley.size().y / 2.0),
+                egui::Pos2::new(
+                    glyph_rect.center().x - galley.size().x / 2.0,
+                    row.center().y - galley.size().y / 2.0,
+                ),
                 galley,
                 color,
             );
@@ -815,7 +897,11 @@ impl App {
             "dropped" => (theme::FAINT, theme::regular_family()),
             _ => (theme::GOLD, theme::regular_family()),
         };
-        let galley = ui.painter().layout_no_wrap(subject.name.clone(), egui::FontId::new(13.0, family), color);
+        let galley = ui.painter().layout_no_wrap(
+            subject.name.clone(),
+            egui::FontId::new(13.0, family),
+            color,
+        );
         let name_rect = egui::Rect::from_min_size(
             egui::Pos2::new(text_x, row.center().y - galley.size().y / 2.0),
             galley.size(),
@@ -871,14 +957,26 @@ impl App {
             );
         } else if subject.stale {
             let label = format!("! {}d", subject.days_idle.unwrap_or(0));
-            let galley = ui.painter().layout_no_wrap(label.clone(), theme::italic_font(11.0), theme::RED);
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(label.clone(), theme::italic_font(11.0), theme::RED);
             let badge_rect = egui::Rect::from_min_size(
                 egui::Pos2::new(tail, row.center().y - galley.size().y / 2.0),
                 galley.size(),
             );
-            let badge_resp = ui.interact(badge_rect, ui.id().with(("stale", subject.id)), egui::Sense::click());
-            let c = if badge_resp.hovered() { theme::RED_HOT } else { theme::RED };
-            let galley = ui.painter().layout_no_wrap(label, theme::italic_font(11.0), c);
+            let badge_resp = ui.interact(
+                badge_rect,
+                ui.id().with(("stale", subject.id)),
+                egui::Sense::click(),
+            );
+            let c = if badge_resp.hovered() {
+                theme::RED_HOT
+            } else {
+                theme::RED
+            };
+            let galley = ui
+                .painter()
+                .layout_no_wrap(label, theme::italic_font(11.0), c);
             ui.painter().galley(badge_rect.min, galley, c);
             if badge_resp.clicked() {
                 self.open_prompt(
@@ -907,14 +1005,25 @@ impl App {
             egui::Pos2::new(row.right() - 8.0, row.center().y),
             egui::Vec2::new(16.0, height),
         );
-        let kebab_resp = ui.interact(kebab_rect, ui.id().with(("kebab", subject.id)), egui::Sense::click());
+        let kebab_resp = ui.interact(
+            kebab_rect,
+            ui.id().with(("kebab", subject.id)),
+            egui::Sense::click(),
+        );
         theme::paint_kebab(
             ui.painter(),
             kebab_rect.center(),
-            if kebab_resp.hovered() { theme::MUTED } else { theme::FAINT },
+            if kebab_resp.hovered() {
+                theme::MUTED
+            } else {
+                theme::FAINT
+            },
         );
         if kebab_resp.clicked() {
-            self.tracker_menu = Some((subject.id, kebab_rect.left_bottom() + egui::Vec2::new(-120.0, 4.0)));
+            self.tracker_menu = Some((
+                subject.id,
+                kebab_rect.left_bottom() + egui::Vec2::new(-120.0, 4.0),
+            ));
         }
 
         if self.tracker_editor == Some(subject.id) {
@@ -983,7 +1092,9 @@ impl App {
         if self.summary.is_none() {
             self.reload_summary();
         }
-        let Some(summary) = self.summary.clone() else { return };
+        let Some(summary) = self.summary.clone() else {
+            return;
+        };
         let mut open_card: Option<lockin_core::CardKind> = None;
 
         Self::section_title(ui, "summary", "");
@@ -1084,7 +1195,10 @@ impl App {
                 .selected_text(pretty_month(&shown))
                 .show_ui(ui, |ui| {
                     for m in &months {
-                        if ui.selectable_label(*m == self.export_month, pretty_month(m)).clicked() {
+                        if ui
+                            .selectable_label(*m == self.export_month, pretty_month(m))
+                            .clicked()
+                        {
                             self.export_month = m.clone();
                         }
                     }
@@ -1110,7 +1224,13 @@ impl App {
         ui.add_space(12.0);
 
         ui.label(theme::b("window", 13.0).color(theme::GOLD));
-        ui.label(theme::i("default size — resizing the window saves automatically", 11.0).color(theme::MUTED));
+        ui.label(
+            theme::i(
+                "default size — resizing the window saves automatically",
+                11.0,
+            )
+            .color(theme::MUTED),
+        );
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(theme::i("width", 12.0).color(theme::MUTED));
@@ -1157,18 +1277,14 @@ impl App {
         ui.horizontal(|ui| {
             ui.add_sized(
                 [64.0, 24.0],
-                egui::TextEdit::singleline(&mut self.settings_zoom)
-                    .font(theme::regular_font(13.0)),
+                egui::TextEdit::singleline(&mut self.settings_zoom).font(theme::regular_font(13.0)),
             );
             ui.label(theme::t("%", 12.0).color(theme::MUTED));
             if theme::link(ui, "apply", 13.0, theme::RED).clicked() {
                 let z = self.settings_zoom.trim().parse::<f32>().unwrap_or(-1.0);
                 if !(90.0..=200.0).contains(&z) {
-                    self.settings_msg = Some((
-                        "zoom 90–200%".into(),
-                        false,
-                        std::time::Instant::now(),
-                    ));
+                    self.settings_msg =
+                        Some(("zoom 90–200%".into(), false, std::time::Instant::now()));
                 } else {
                     self.set_zoom(ui.ctx(), z / 100.0);
                     self.settings_msg = Some((
@@ -1181,16 +1297,11 @@ impl App {
             if theme::link(ui, "reset 155%", 12.0, theme::RED).clicked() {
                 self.settings_zoom = "155".into();
                 self.set_zoom(ui.ctx(), 1.55);
-                self.settings_msg = Some((
-                    "zoom 155% saved".into(),
-                    true,
-                    std::time::Instant::now(),
-                ));
+                self.settings_msg =
+                    Some(("zoom 155% saved".into(), true, std::time::Instant::now()));
             }
         });
-        ui.label(
-            theme::i("Ctrl + / Ctrl - / Ctrl 0 also zoom", 11.0).color(theme::DIM),
-        );
+        ui.label(theme::i("Ctrl + / Ctrl - / Ctrl 0 also zoom", 11.0).color(theme::DIM));
         if let Some((msg, ok, at)) = &self.settings_msg {
             if at.elapsed().as_secs() < 3 {
                 ui.add_space(10.0);
@@ -1268,7 +1379,9 @@ impl App {
                         ui.label(theme::t(format!("{start} ~ {end}"), 13.0).color(theme::GOLD));
                         ui.label(
                             theme::i(
-                                p.category_name.clone().unwrap_or_else(|| "Unallocated".into()),
+                                p.category_name
+                                    .clone()
+                                    .unwrap_or_else(|| "Unallocated".into()),
                                 13.0,
                             )
                             .color(theme::MUTED),
@@ -1276,8 +1389,13 @@ impl App {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(theme::t(p.minutes.to_string(), 13.0).color(theme::BRIGHT));
                         });
-                        let (rect, resp) = ui.allocate_exact_size(egui::Vec2::new(12.0, 14.0), egui::Sense::click());
-                        let color = if resp.hovered() { theme::RED_HOT } else { theme::FAINT };
+                        let (rect, resp) = ui
+                            .allocate_exact_size(egui::Vec2::new(12.0, 14.0), egui::Sense::click());
+                        let color = if resp.hovered() {
+                            theme::RED_HOT
+                        } else {
+                            theme::FAINT
+                        };
                         theme::paint_x(ui.painter(), rect.center(), 7.0, color);
                         if resp.clicked() {
                             delete = Some(p.id);
@@ -1362,7 +1480,6 @@ impl App {
     fn _layout(_: Layout, _: Align) {}
 }
 
-
 pub fn fmt_date(iso: &str) -> String {
     if iso.len() < 10 {
         return iso.to_string();
@@ -1372,10 +1489,7 @@ pub fn fmt_date(iso: &str) -> String {
         .unwrap_or_else(|_| iso[..10].to_string())
 }
 
-impl App {
-    pub fn view_summary_placeholder(&mut self, _ui: &mut Ui) {}
-}
-
+impl App {}
 
 fn parse_month(value: &str) -> Result<(i32, u32), ()> {
     let (y, m) = value.split_once('-').ok_or(())?;
@@ -1384,8 +1498,18 @@ fn parse_month(value: &str) -> Result<(i32, u32), ()> {
 
 fn pretty_month(value: &str) -> String {
     const NAMES: [&str; 12] = [
-        "january", "february", "march", "april", "may", "june", "july", "august", "september",
-        "october", "november", "december",
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
     ];
     match parse_month(value) {
         Ok((y, m)) if (1..=12).contains(&m) => format!("{} {y}", NAMES[m as usize - 1]),
@@ -1393,10 +1517,14 @@ fn pretty_month(value: &str) -> String {
     }
 }
 
-
 fn popup_close(ui: &mut Ui) -> bool {
-    let (rect, response) = ui.allocate_exact_size(egui::Vec2::new(16.0, 16.0), egui::Sense::click());
-    let color = if response.hovered() { theme::RED_HOT } else { theme::MUTED };
+    let (rect, response) =
+        ui.allocate_exact_size(egui::Vec2::new(16.0, 16.0), egui::Sense::click());
+    let color = if response.hovered() {
+        theme::RED_HOT
+    } else {
+        theme::MUTED
+    };
     theme::paint_x(ui.painter(), rect.center(), 8.0, color);
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

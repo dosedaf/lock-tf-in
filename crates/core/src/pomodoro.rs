@@ -92,7 +92,13 @@ impl Db {
         Ok(())
     }
 
-    fn log_period(&self, st: &PomoState, minutes: i64, started_at: &str, ended_at: &str) -> Result<()> {
+    fn log_period(
+        &self,
+        st: &PomoState,
+        minutes: i64,
+        started_at: &str,
+        ended_at: &str,
+    ) -> Result<()> {
         let cat = st.block_category_id.or(st.category_id);
         let day = st.block_day_id.unwrap_or_else(|| self.current_day_id());
         let sub = st.block_subject_id.or(st.subject_id);
@@ -133,7 +139,12 @@ impl Db {
             .clone()
             .or_else(|| st.phase_started_at.clone())
             .unwrap_or_else(now_iso);
-        self.log_period(st, ((unlogged as f64) / 60_000.0).round().max(1.0) as i64, &started, &now_iso())?;
+        self.log_period(
+            st,
+            ((unlogged as f64) / 60_000.0).round().max(1.0) as i64,
+            &started,
+            &now_iso(),
+        )?;
         st.logged_ms = elapsed;
         Ok(())
     }
@@ -159,11 +170,20 @@ impl Db {
                         .to_string()
                 })
                 .unwrap_or_else(now_iso);
-            self.log_period(&st, ((rem_ms as f64) / 60_000.0).round().max(1.0) as i64, &p_started, &p_ended)?;
+            self.log_period(
+                &st,
+                ((rem_ms as f64) / 60_000.0).round().max(1.0) as i64,
+                &p_started,
+                &p_ended,
+            )?;
         }
         notify_phase(&st.phase);
         let auto = self.pomo_config().auto_next;
-        let next = if st.phase == "focus" { "break" } else { "focus" };
+        let next = if st.phase == "focus" {
+            "break"
+        } else {
+            "focus"
+        };
         self.new_phase(&mut st, next, auto)?;
         self.save_pomo_state(&st)?;
         self.pomo_view_from(&st)
@@ -182,12 +202,16 @@ impl Db {
 
         let category = if let Some(id) = st.category_id {
             self.conn
-                .query_row("SELECT id, name FROM categories WHERE id=?", params![id], |r| {
-                    Ok(NamedId {
-                        id: r.get(0)?,
-                        name: r.get(1)?,
-                    })
-                })
+                .query_row(
+                    "SELECT id, name FROM categories WHERE id=?",
+                    params![id],
+                    |r| {
+                        Ok(NamedId {
+                            id: r.get(0)?,
+                            name: r.get(1)?,
+                        })
+                    },
+                )
                 .optional()?
         } else {
             None
@@ -218,7 +242,7 @@ impl Db {
         )?;
         if st.phase == "focus" {
             if let Some(ps) = st.phase_started_at.as_deref() {
-                if ps.len() >= 10 && &ps[..10] == today_str() {
+                if ps.len() >= 10 && ps[..10] == today_str() {
                     let unlogged = self.pomo_elapsed_ms(st) - st.logged_ms;
                     if unlogged > 0 {
                         today_min += ((unlogged as f64) / 60_000.0).round() as i64;
@@ -287,7 +311,11 @@ impl Db {
             }
             PomoAction::Skip => {
                 self.log_partial(&mut st)?;
-                let next = if st.phase == "focus" { "break" } else { "focus" };
+                let next = if st.phase == "focus" {
+                    "break"
+                } else {
+                    "focus"
+                };
                 self.new_phase(&mut st, next, false)?;
                 self.save_pomo_state(&st)?;
             }
@@ -310,9 +338,11 @@ impl Db {
                 if let Some(sid) = sid {
                     let exists = self
                         .conn
-                        .query_row("SELECT 1 FROM tracker_subjects WHERE id=?", params![sid], |r| {
-                            r.get::<_, i64>(0)
-                        })
+                        .query_row(
+                            "SELECT 1 FROM tracker_subjects WHERE id=?",
+                            params![sid],
+                            |r| r.get::<_, i64>(0),
+                        )
                         .optional()?;
                     if exists.is_none() {
                         bail!("subject not found");

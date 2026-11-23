@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{Datelike, Duration, Local, NaiveDate};
 use rusqlite::params;
 
-use crate::db::{parse_iso, today_str, Db};
+use crate::db::{today_str, Db};
 use crate::model::{Bucket, DailyCategory, Summary};
 
 impl Db {
@@ -94,7 +94,7 @@ impl Db {
                 .sum();
             if min > 0 {
                 months.push(Bucket {
-                    label: format!("{}", month_name(mo)),
+                    label: month_name(mo).to_string(),
                     min,
                 });
             }
@@ -137,7 +137,7 @@ impl Db {
             let key = date.format("%Y-%m-%d").to_string();
             let (cats, total) = daily_map.get(&key).cloned().unwrap_or_default();
             let mut cats: Vec<(String, i64)> = cats.into_iter().collect();
-            cats.sort_by(|a, b| b.1.cmp(&a.1));
+            cats.sort_by_key(|b| std::cmp::Reverse(b.1));
             daily_categories.push(DailyCategory {
                 date: key,
                 label: date.format("%a").to_string(),
@@ -196,9 +196,9 @@ impl Db {
     }
 
     pub fn months(&self) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT DISTINCT substr(started_at,1,7) AS m FROM pomo_periods ORDER BY m DESC")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT substr(started_at,1,7) AS m FROM pomo_periods ORDER BY m DESC",
+        )?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         let mut out: Vec<String> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         let cur = Local::now().format("%Y-%m").to_string();
@@ -222,5 +222,8 @@ fn month_name(m: u32) -> &'static str {
     const NAMES: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    NAMES.get(m.saturating_sub(1) as usize).copied().unwrap_or("")
+    NAMES
+        .get(m.saturating_sub(1) as usize)
+        .copied()
+        .unwrap_or("")
 }

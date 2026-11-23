@@ -10,7 +10,6 @@ struct Raw {
     date: Option<NaiveDate>,
     range: Option<(u32, u32, u32, u32)>,
     project: Option<String>,
-    minutes: Option<i64>,
 }
 
 fn parse_date(line: &str) -> Option<NaiveDate> {
@@ -72,22 +71,23 @@ pub fn parse_pomofocus(text: &str) -> Vec<ImportPreview> {
                 continue;
             }
         }
-        if c.range.is_some() && line.chars().all(|ch| ch.is_ascii_digit()) {
-            if let Ok(minutes) = line.parse::<i64>() {
-                let out = ImportPreview {
-                    project: c
-                        .project
-                        .clone()
-                        .filter(|p| !p.trim().is_empty())
-                        .unwrap_or_else(|| "Unallocated".into()),
-                    minutes,
-                    start: String::new(),
-                    end: String::new(),
-                };
-                let start = c.date.unwrap();
-                records.push((out, start, c.range.unwrap()));
-                cur = None;
-                continue;
+        if let (Some(range), Some(date)) = (c.range, c.date) {
+            if line.chars().all(|ch| ch.is_ascii_digit()) {
+                if let Ok(minutes) = line.parse::<i64>() {
+                    let out = ImportPreview {
+                        project: c
+                            .project
+                            .clone()
+                            .filter(|p| !p.trim().is_empty())
+                            .unwrap_or_else(|| "Unallocated".into()),
+                        minutes,
+                        start: String::new(),
+                        end: String::new(),
+                    };
+                    records.push((out, date, range));
+                    cur = None;
+                    continue;
+                }
             }
         }
         if c.range.is_some() && c.project.is_none() {
@@ -97,14 +97,10 @@ pub fn parse_pomofocus(text: &str) -> Vec<ImportPreview> {
 
     let mut out = Vec::new();
     for (mut rec, date, (sh, sm, eh, em)) in records {
-        let start = NaiveDateTime::new(
-            date,
-            NaiveTime::from_hms_opt(sh, sm, 0).unwrap_or_default(),
-        );
-        let mut end = NaiveDateTime::new(
-            date,
-            NaiveTime::from_hms_opt(eh, em, 0).unwrap_or_default(),
-        );
+        let start =
+            NaiveDateTime::new(date, NaiveTime::from_hms_opt(sh, sm, 0).unwrap_or_default());
+        let mut end =
+            NaiveDateTime::new(date, NaiveTime::from_hms_opt(eh, em, 0).unwrap_or_default());
         if end < start {
             end += Duration::days(1);
         }
@@ -118,11 +114,7 @@ pub fn parse_pomofocus(text: &str) -> Vec<ImportPreview> {
 impl Db {
     pub fn ensure_category(&self, name: &str) -> Result<i64> {
         let name = name.trim();
-        let name = if name.is_empty() {
-            "Unallocated"
-        } else {
-            name
-        };
+        let name = if name.is_empty() { "Unallocated" } else { name };
         self.conn.execute(
             "INSERT OR IGNORE INTO categories (name, position) \
              VALUES (?, COALESCE((SELECT MAX(position)+1 FROM categories),1))",
