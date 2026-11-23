@@ -1,0 +1,19 @@
+[package]
+name = "lockin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lockin"
+path = "src/main.rs"
+
+[dependencies]
+lockin-core = { path = "../core" }
+anyhow.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+eframe = { version = "0.32", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+dirs = "6"
