@@ -1099,7 +1099,7 @@ impl App {
     pub fn view_settings(&mut self, ui: &mut Ui) {
         if self.settings_needs_sync {
             let (w, h) = self.native_window_size(ui.ctx());
-            if (400..=4000).contains(&w) && (300..=3000).contains(&h) {
+            if w > 0 && h > 0 {
                 self.settings_w = w.to_string();
                 self.settings_h = h.to_string();
                 self.settings_zoom = format!("{:.0}", self.zoom * 100.0);
@@ -1127,9 +1127,9 @@ impl App {
             if theme::link(ui, "apply", 13.0, theme::RED).clicked() {
                 let w = self.settings_w.trim().parse::<f32>().unwrap_or(-1.0);
                 let h = self.settings_h.trim().parse::<f32>().unwrap_or(-1.0);
-                if w < 640.0 || w > 4000.0 || h < 620.0 || h > 3000.0 {
+                if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
                     self.settings_msg = Some((
-                        "width 640–4000, height 620–3000".into(),
+                        "width and height must be positive".into(),
                         false,
                         std::time::Instant::now(),
                     ));

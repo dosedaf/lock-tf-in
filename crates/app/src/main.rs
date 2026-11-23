@@ -125,17 +125,16 @@ fn main() -> eframe::Result {
     let win_w = lockin_core::read_setting(&db_path, "ui_window_w")
         .and_then(|v| v.parse::<f32>().ok())
         .unwrap_or(960.0)
-        .clamp(640.0, 4000.0);
+        .max(1.0);
     let win_h = lockin_core::read_setting(&db_path, "ui_window_h")
         .and_then(|v| v.parse::<f32>().ok())
         .unwrap_or(780.0)
-        .clamp(620.0, 3000.0);
+        .max(1.0);
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("LOCK IN")
             .with_inner_size([win_w, win_h])
-            .with_min_inner_size([640.0, 620.0])
             .with_resizable(true)
             .with_maximized(false)
             .with_decorations(false)

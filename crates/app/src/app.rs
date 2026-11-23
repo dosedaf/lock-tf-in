@@ -619,17 +619,20 @@ impl App {
     }
 
     pub fn native_window_size(&self, ctx: &egui::Context) -> (u32, u32) {
-        let size = ctx.screen_rect().size() * self.zoom;
-        (
-            size.x.round().max(1.0) as u32,
-            size.y.round().max(1.0) as u32,
-        )
+        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+            let size = rect.size();
+            return (
+                size.x.round().max(1.0) as u32,
+                size.y.round().max(1.0) as u32,
+            );
+        }
+        self.last_window
     }
 
     fn track_window(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
         let size = self.native_window_size(ctx);
-        if !(400..=5000).contains(&size.0) || !(300..=4000).contains(&size.1) {
+        if size.0 == 0 || size.1 == 0 {
             return;
         }
         if size != self.pending_window {
@@ -652,7 +655,7 @@ impl App {
 
     fn save_window_now(&mut self, ctx: &egui::Context) {
         let size = self.native_window_size(ctx);
-        if !(400..=5000).contains(&size.0) || !(300..=4000).contains(&size.1) {
+        if size.0 == 0 || size.1 == 0 {
             return;
         }
         self.last_window = size;
