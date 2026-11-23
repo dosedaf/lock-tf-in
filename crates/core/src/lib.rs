@@ -7,7 +7,7 @@ pub mod pomodoro;
 pub mod summary;
 pub mod tracker;
 
-pub use db::Db;
+pub use db::{read_setting, Db};
 pub use model::*;
 pub use pomodoro::{notify_phase, PomoAction};
 

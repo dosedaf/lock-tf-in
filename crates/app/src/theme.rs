@@ -531,23 +531,25 @@ pub fn textured_panel<R>(
     shapes.push(egui::Shape::rect_filled(
         rect,
         0.0,
-        Color32::from_rgba_unmultiplied(16, 10, 3, 145),
+        Color32::from_rgba_unmultiplied(16, 10, 3, 105),
     ));
-    shapes.push(egui::Shape::line_segment(
-        [rect.left_top(), rect.right_top()],
-        Stroke::new(1.0_f32, BEVEL_LO),
+    shapes.push(egui::Shape::rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0_f32, Color32::BLACK),
+        egui::StrokeKind::Inside,
     ));
-    shapes.push(egui::Shape::line_segment(
-        [rect.left_top(), rect.left_bottom()],
-        Stroke::new(1.0_f32, BEVEL_LO),
+    shapes.push(egui::Shape::rect_stroke(
+        rect.shrink(1.0),
+        0.0,
+        Stroke::new(1.0_f32, Color32::from_rgb(0xa8, 0x78, 0x30)),
+        egui::StrokeKind::Inside,
     ));
-    shapes.push(egui::Shape::line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, BEVEL_HI),
-    ));
-    shapes.push(egui::Shape::line_segment(
-        [rect.right_top(), rect.right_bottom()],
-        Stroke::new(1.0_f32, BEVEL_HI),
+    shapes.push(egui::Shape::rect_stroke(
+        rect.shrink(2.0),
+        0.0,
+        Stroke::new(1.0_f32, Color32::BLACK),
+        egui::StrokeKind::Inside,
     ));
     ui.painter()
         .set(bg_idx, egui::Shape::Vec(shapes));

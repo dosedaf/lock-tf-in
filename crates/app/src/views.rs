@@ -108,7 +108,7 @@ impl App {
                 ui.label(theme::b(fmt_hm(self.pomo.today_focused_min), 13.0).color(theme::BRIGHT));
             });
             ui.add_space(14.0);
-            if theme::link(ui, "settings", 13.0, theme::RED).clicked() {
+            if theme::link(ui, "timer settings", 13.0, theme::RED).clicked() {
                 self.settings_open = !self.settings_open;
                 if self.settings_open {
                     self.cfg_focus = self.pomo.focus_min.to_string();
@@ -122,7 +122,7 @@ impl App {
     pub fn settings_popup(&mut self, ctx: &egui::Context) {
         let mut act = SettingsActions::default();
         let screen_w = ctx.screen_rect().width();
-        let wide = screen_w >= 560.0;
+        let wide = screen_w >= 500.0;
         let width = (screen_w - 64.0).clamp(300.0, 540.0);
 
         egui::Area::new(egui::Id::new("settings-popup"))
@@ -137,7 +137,7 @@ impl App {
                     egui::Margin::symmetric(16, 12),
                     |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(theme::b("settings", 13.0).color(theme::BRIGHT));
+                            ui.label(theme::b("timer settings", 13.0).color(theme::BRIGHT));
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if popup_close(ui) {
                                     act.close = true;
@@ -145,16 +145,22 @@ impl App {
                             });
                         });
                         ui.add_space(10.0);
-                        if wide {
-                            ui.columns(2, |cols| {
-                                self.settings_timer_section(&mut cols[0], &mut act);
-                                self.settings_context_section(&mut cols[1], &mut act);
+                        let max_h = (ctx.screen_rect().height() - 96.0).max(120.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(max_h)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                if wide {
+                                    ui.columns(2, |cols| {
+                                        self.settings_timer_section(&mut cols[0], &mut act);
+                                        self.settings_context_section(&mut cols[1], &mut act);
+                                    });
+                                } else {
+                                    self.settings_timer_section(ui, &mut act);
+                                    ui.add_space(14.0);
+                                    self.settings_context_section(ui, &mut act);
+                                }
                             });
-                        } else {
-                            self.settings_timer_section(ui, &mut act);
-                            ui.add_space(14.0);
-                            self.settings_context_section(ui, &mut act);
-                        }
                     },
                 );
             });
@@ -226,12 +232,12 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(theme::i("focus", 12.0).color(theme::MUTED));
             ui.add_sized(
-                [54.0, 24.0],
+                [48.0, 24.0],
                 egui::TextEdit::singleline(&mut self.cfg_focus).font(theme::regular_font(13.0)),
             );
             ui.label(theme::i("break", 12.0).color(theme::MUTED));
             ui.add_sized(
-                [54.0, 24.0],
+                [48.0, 24.0],
                 egui::TextEdit::singleline(&mut self.cfg_break).font(theme::regular_font(13.0)),
             );
         });
@@ -271,8 +277,9 @@ impl App {
             .find(|(id, _)| Some(*id) == cur_cat)
             .map(|(_, name)| name.clone())
             .unwrap_or_else(|| "Unallocated".into());
+        let combo_w = ui.available_width().min(220.0);
         egui::ComboBox::from_id_salt("cat-select")
-            .width(190.0)
+            .width(combo_w)
             .selected_text(selected)
             .show_ui(ui, |ui| {
                 if ui.selectable_label(cur_cat.is_none(), "Unallocated").clicked() {
@@ -284,14 +291,14 @@ impl App {
                     }
                 }
             });
+        ui.add(
+            egui::TextEdit::singleline(&mut self.category_new)
+                .hint_text("new category...")
+                .desired_width(f32::INFINITY)
+                .font(theme::regular_font(13.0)),
+        );
         ui.horizontal(|ui| {
-            ui.add_sized(
-                [130.0, 24.0],
-                egui::TextEdit::singleline(&mut self.category_new)
-                    .hint_text("new category...")
-                    .font(theme::regular_font(13.0)),
-            );
-            if theme::link(ui, "+", 13.0, theme::RED).clicked() {
+            if theme::link(ui, "+ add", 12.0, theme::RED).clicked() {
                 act.add_category = true;
             }
             if theme::link(ui, "rename", 12.0, theme::RED).clicked() {
@@ -309,8 +316,9 @@ impl App {
             .as_ref()
             .map(|s| s.name.clone())
             .unwrap_or_else(|| "none".into());
+        let combo_w = ui.available_width().min(220.0);
         egui::ComboBox::from_id_salt("subj-select")
-            .width(220.0)
+            .width(combo_w)
             .selected_text(selected)
             .show_ui(ui, |ui| {
                 if ui.selectable_label(cur_subj.is_none(), "none").clicked() {
@@ -358,12 +366,79 @@ impl App {
         for group in groups {
             self.tracker_group(ui, &group);
         }
+
+        if ui.input(|i| i.pointer.any_released()) {
+            if let (Some(from), Some(to)) = (self.drag_group, self.drag_group_target) {
+                if from != to {
+                    let mut order: Vec<i64> = self
+                        .tracker
+                        .as_ref()
+                        .map(|t| t.groups.iter().map(|g| g.id).collect())
+                        .unwrap_or_default();
+                    if let (Some(f), Some(t)) = (
+                        order.iter().position(|id| *id == from),
+                        order.iter().position(|id| *id == to),
+                    ) {
+                        let id = order.remove(f);
+                        order.insert(t, id);
+                        let _ = self.db.reorder_groups(&order);
+                        self.reload_tracker();
+                    }
+                }
+            }
+            if let (Some((gid, from)), Some(to)) = (self.drag_subject, self.drag_subject_target) {
+                if from != to {
+                    let mut order: Vec<i64> = self
+                        .tracker
+                        .as_ref()
+                        .and_then(|t| t.groups.iter().find(|g| g.id == gid))
+                        .map(|g| g.subjects.iter().map(|s| s.id).collect())
+                        .unwrap_or_default();
+                    if let (Some(f), Some(t)) = (
+                        order.iter().position(|id| *id == from),
+                        order.iter().position(|id| *id == to),
+                    ) {
+                        let id = order.remove(f);
+                        order.insert(t, id);
+                        let _ = self.db.reorder_subjects(&order);
+                        self.reload_tracker();
+                    }
+                }
+            }
+            self.drag_group = None;
+            self.drag_group_target = None;
+            self.drag_subject = None;
+            self.drag_subject_target = None;
+        }
     }
 
     fn tracker_group(&mut self, ui: &mut Ui, group: &lockin_core::TrackerGroup) {
         let width = ui.available_width();
         let (row, response) = ui.allocate_exact_size(egui::Vec2::new(width, 22.0), egui::Sense::click_and_drag());
         let hovered = response.hovered();
+        if response.drag_started() {
+            self.drag_group = Some(group.id);
+        }
+        if self.drag_group.is_some() && hovered {
+            self.drag_group_target = Some(group.id);
+        }
+        let dragging = self.drag_group == Some(group.id);
+        let drop_target = self.drag_group_target == Some(group.id)
+            && self.drag_group.is_some()
+            && self.drag_group != Some(group.id);
+        if dragging || drop_target {
+            ui.painter().rect_filled(
+                row,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(215, 160, 75, 12),
+            );
+        }
+        if drop_target {
+            ui.painter().line_segment(
+                [row.left_top(), row.right_top()],
+                egui::Stroke::new(2.0_f32, theme::GOLD),
+            );
+        }
         let collapsed = !self.group_expanded.contains(&group.id);
         let caret_rect = egui::Rect::from_min_size(row.min, egui::Vec2::new(16.0, row.height()));
         let caret_resp = ui.interact(caret_rect, ui.id().with(("gcaret", group.id)), egui::Sense::click());
@@ -400,7 +475,17 @@ impl App {
             name_galley.clone(),
             theme::GOLD,
         );
-        let name_resp = ui.interact(name_rect, ui.id().with(("gname", group.id)), egui::Sense::click());
+        let name_resp = ui.interact(
+            name_rect,
+            ui.id().with(("gname", group.id)),
+            egui::Sense::click_and_drag(),
+        );
+        if name_resp.drag_started() {
+            self.drag_group = Some(group.id);
+        }
+        if self.drag_group.is_some() && name_resp.hovered() {
+            self.drag_group_target = Some(group.id);
+        }
         if name_resp.clicked() {
             self.open_prompt(
                 crate::app::DialogKind::RenameGroup(group.id),
@@ -627,6 +712,31 @@ impl App {
         let height = 20.0;
         let (row, response) = ui.allocate_exact_size(egui::Vec2::new(width, height), egui::Sense::click_and_drag());
         let hovered = response.hovered();
+        if response.drag_started() {
+            self.drag_subject = Some((group.id, subject.id));
+        }
+        if let Some((gid, _)) = self.drag_subject {
+            if gid == group.id && hovered {
+                self.drag_subject_target = Some(subject.id);
+            }
+        }
+        let dragging = self.drag_subject == Some((group.id, subject.id));
+        let drop_target = self.drag_subject_target == Some(subject.id)
+            && self.drag_subject.map(|(gid, id)| (gid, id)) != Some((group.id, subject.id))
+            && self.drag_subject.map(|(gid, _)| gid) == Some(group.id);
+        if dragging || drop_target {
+            ui.painter().rect_filled(
+                row,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(215, 160, 75, 12),
+            );
+        }
+        if drop_target {
+            ui.painter().line_segment(
+                [row.left_top(), row.right_top()],
+                egui::Stroke::new(2.0_f32, theme::GOLD),
+            );
+        }
         if hovered {
             ui.painter().rect_filled(
                 row,
@@ -714,7 +824,19 @@ impl App {
         if matches!(subject.state.as_str(), "done" | "dropped") {
             theme::strike(ui.painter(), name_rect, color);
         }
-        let name_resp = ui.interact(name_rect, ui.id().with(("sname", subject.id)), egui::Sense::click());
+        let name_resp = ui.interact(
+            name_rect,
+            ui.id().with(("sname", subject.id)),
+            egui::Sense::click_and_drag(),
+        );
+        if name_resp.drag_started() {
+            self.drag_subject = Some((group.id, subject.id));
+        }
+        if let Some((gid, _)) = self.drag_subject {
+            if gid == group.id && name_resp.hovered() {
+                self.drag_subject_target = Some(subject.id);
+            }
+        }
         if name_resp.clicked() {
             if self.tracker_editor == Some(subject.id) {
                 self.tracker_editor = None;
@@ -971,6 +1093,139 @@ impl App {
 
         if let Some(kind) = open_card {
             self.export_card(kind);
+        }
+    }
+
+    pub fn view_settings(&mut self, ui: &mut Ui) {
+        if self.settings_needs_sync {
+            let (w, h) = self.native_window_size(ui.ctx());
+            if (400..=4000).contains(&w) && (300..=3000).contains(&h) {
+                self.settings_w = w.to_string();
+                self.settings_h = h.to_string();
+                self.settings_zoom = format!("{:.0}", self.zoom * 100.0);
+                self.settings_needs_sync = false;
+            }
+        }
+        Self::section_title(ui, "settings", "");
+        ui.add_space(12.0);
+
+        ui.label(theme::b("window", 13.0).color(theme::GOLD));
+        ui.label(theme::i("default size — resizing the window saves automatically", 11.0).color(theme::MUTED));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(theme::i("width", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [76.0, 24.0],
+                egui::TextEdit::singleline(&mut self.settings_w).font(theme::regular_font(13.0)),
+            );
+            ui.add_space(8.0);
+            ui.label(theme::i("height", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [76.0, 24.0],
+                egui::TextEdit::singleline(&mut self.settings_h).font(theme::regular_font(13.0)),
+            );
+            if theme::link(ui, "apply", 13.0, theme::RED).clicked() {
+                let w = self.settings_w.trim().parse::<f32>().unwrap_or(-1.0);
+                let h = self.settings_h.trim().parse::<f32>().unwrap_or(-1.0);
+                if w < 640.0 || w > 4000.0 || h < 620.0 || h > 3000.0 {
+                    self.settings_msg = Some((
+                        "width 640–4000, height 620–3000".into(),
+                        false,
+                        std::time::Instant::now(),
+                    ));
+                } else {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                        egui::Vec2::new(w, h),
+                    ));
+                    let (wi, hi) = (w.round() as u32, h.round() as u32);
+                    self.last_window = (wi, hi);
+                    self.pending_window = (wi, hi);
+                    self.window_save_at = None;
+                    let _ = self.db.set_setting("ui_window_w", &wi.to_string());
+                    let _ = self.db.set_setting("ui_window_h", &hi.to_string());
+                    self.settings_msg = Some((
+                        "window size saved".into(),
+                        true,
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+            if theme::link(ui, "use current", 12.0, theme::RED).clicked() {
+                let (w, h) = self.native_window_size(ui.ctx());
+                self.settings_w = w.to_string();
+                self.settings_h = h.to_string();
+            }
+            if theme::link(ui, "reset", 12.0, theme::RED).clicked() {
+                self.settings_w = "960".into();
+                self.settings_h = "780".into();
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::new(
+                        960.0, 780.0,
+                    )));
+                self.last_window = (960, 780);
+                self.pending_window = (960, 780);
+                let _ = self.db.set_setting("ui_window_w", "960");
+                let _ = self.db.set_setting("ui_window_h", "780");
+                self.settings_msg = Some((
+                    "reset to 960 × 780".into(),
+                    true,
+                    std::time::Instant::now(),
+                ));
+            }
+        });
+        let (cw, ch) = self.native_window_size(ui.ctx());
+        ui.label(theme::i(format!("current: {cw} × {ch}"), 11.0).color(theme::DIM));
+
+        ui.add_space(24.0);
+        ui.label(theme::b("zoom", 13.0).color(theme::GOLD));
+        ui.label(theme::i("applies to the whole ui · saved", 11.0).color(theme::MUTED));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                [64.0, 24.0],
+                egui::TextEdit::singleline(&mut self.settings_zoom)
+                    .font(theme::regular_font(13.0)),
+            );
+            ui.label(theme::t("%", 12.0).color(theme::MUTED));
+            if theme::link(ui, "apply", 13.0, theme::RED).clicked() {
+                let z = self.settings_zoom.trim().parse::<f32>().unwrap_or(-1.0);
+                if !(90.0..=200.0).contains(&z) {
+                    self.settings_msg = Some((
+                        "zoom 90–200%".into(),
+                        false,
+                        std::time::Instant::now(),
+                    ));
+                } else {
+                    self.set_zoom(ui.ctx(), z / 100.0);
+                    self.settings_msg = Some((
+                        format!("zoom {:.0}% saved", z),
+                        true,
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
+            if theme::link(ui, "reset 155%", 12.0, theme::RED).clicked() {
+                self.settings_zoom = "155".into();
+                self.set_zoom(ui.ctx(), 1.55);
+                self.settings_msg = Some((
+                    "zoom 155% saved".into(),
+                    true,
+                    std::time::Instant::now(),
+                ));
+            }
+        });
+        ui.label(
+            theme::i("Ctrl + / Ctrl - / Ctrl 0 also zoom", 11.0).color(theme::DIM),
+        );
+        if let Some((msg, ok, at)) = &self.settings_msg {
+            if at.elapsed().as_secs() < 3 {
+                ui.add_space(10.0);
+                ui.label(theme::tc(
+                    msg,
+                    12.0,
+                    if *ok { theme::MUTED } else { theme::RED_HOT },
+                ));
+            }
         }
     }
 

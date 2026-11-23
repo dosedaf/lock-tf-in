@@ -20,6 +20,7 @@ pub enum View {
     Timer,
     Summary,
     Log,
+    Settings,
 }
 
 impl View {
@@ -30,6 +31,7 @@ impl View {
             View::Timer => "timer",
             View::Summary => "summary",
             View::Log => "log",
+            View::Settings => "settings",
         }
     }
 }
@@ -123,6 +125,18 @@ pub struct App {
     pub toast: Option<(String, Instant)>,
     pub export_month: String,
     pub zoom: f32,
+    pub settings_w: String,
+    pub settings_h: String,
+    pub settings_zoom: String,
+    pub settings_msg: Option<(String, bool, Instant)>,
+    pub settings_needs_sync: bool,
+    pub last_window: (u32, u32),
+    pub pending_window: (u32, u32),
+    pub window_save_at: Option<Instant>,
+    pub drag_group: Option<i64>,
+    pub drag_group_target: Option<i64>,
+    pub drag_subject: Option<(i64, i64)>,
+    pub drag_subject_target: Option<i64>,
     pub screenshot_path: Option<std::path::PathBuf>,
     pub frames: u64,
 }
@@ -143,6 +157,16 @@ impl App {
 
         let month = chrono::Local::now().format("%Y-%m").to_string();
         let months = db.months().unwrap_or_default();
+        let saved_w = db
+            .get_setting("ui_window_w")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(960)
+            .clamp(640, 4000);
+        let saved_h = db
+            .get_setting("ui_window_h")
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(780)
+            .clamp(620, 3000);
         let zoom: f32 = db
             .get_setting("ui_zoom")
             .and_then(|s| s.parse::<f32>().ok())
@@ -161,6 +185,7 @@ impl App {
             "timer" => View::Timer,
             "summary" => View::Summary,
             "log" => View::Log,
+            "settings" => View::Settings,
             _ => View::Tasks,
         };
         let mut app = Self {
@@ -225,6 +250,18 @@ impl App {
             toast: None,
             export_month: month,
             zoom,
+            settings_w: saved_w.to_string(),
+            settings_h: saved_h.to_string(),
+            settings_zoom: format!("{:.0}", zoom * 100.0),
+            settings_msg: None,
+            settings_needs_sync: true,
+            last_window: (saved_w, saved_h),
+            pending_window: (saved_w, saved_h),
+            window_save_at: None,
+            drag_group: None,
+            drag_group_target: None,
+            drag_subject: None,
+            drag_subject_target: None,
             screenshot_path: std::env::var("LOCKIN_SCREENSHOT")
                 .ok()
                 .filter(|s| !s.is_empty())
@@ -336,6 +373,7 @@ impl App {
     pub fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.quitting || QUIT_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
+                self.save_window_now(ctx);
                 let _ = std::fs::remove_file(crate::socket_path());
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -353,6 +391,7 @@ impl App {
             self.reload_timer();
         }
         self.persist_note();
+        self.track_window(ctx);
 
         if self.pomo.running || self.note_dirty {
             ctx.request_repaint_after(Duration::from_millis(250));
@@ -423,13 +462,14 @@ impl App {
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.add_space(24.0);
-                        ui.spacing_mut().item_spacing.x = 18.0;
+                        ui.spacing_mut().item_spacing.x = 14.0;
                         for (view, label) in [
                             (View::Tasks, "tasks"),
                             (View::Tracker, "tracker"),
                             (View::Timer, "timer"),
                             (View::Summary, "summary"),
                             (View::Log, "log"),
+                            (View::Settings, "settings"),
                         ] {
                             if theme::nav_link(ui, label, self.view == view).clicked() {
                                 self.set_view(view);
@@ -461,6 +501,7 @@ impl App {
                                     View::Timer => self.view_timer(ui),
                                     View::Summary => self.view_summary(ui),
                                     View::Log => self.view_log(ui),
+                                    View::Settings => self.view_settings(ui),
                                 }
                                 ui.add_space(40.0);
                             });
@@ -577,7 +618,54 @@ impl App {
         }
     }
 
-    fn set_zoom(&mut self, ctx: &egui::Context, zoom: f32) {
+    pub fn native_window_size(&self, ctx: &egui::Context) -> (u32, u32) {
+        let size = ctx.screen_rect().size() * self.zoom;
+        (
+            size.x.round().max(1.0) as u32,
+            size.y.round().max(1.0) as u32,
+        )
+    }
+
+    fn track_window(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        let size = self.native_window_size(ctx);
+        if !(400..=5000).contains(&size.0) || !(300..=4000).contains(&size.1) {
+            return;
+        }
+        if size != self.pending_window {
+            self.pending_window = size;
+            self.window_save_at = Some(now + Duration::from_millis(500));
+        }
+        if let Some(at) = self.window_save_at {
+            if now >= at && self.pending_window != self.last_window {
+                self.last_window = self.pending_window;
+                self.window_save_at = None;
+                let _ = self
+                    .db
+                    .set_setting("ui_window_w", &self.last_window.0.to_string());
+                let _ = self
+                    .db
+                    .set_setting("ui_window_h", &self.last_window.1.to_string());
+            }
+        }
+    }
+
+    fn save_window_now(&mut self, ctx: &egui::Context) {
+        let size = self.native_window_size(ctx);
+        if !(400..=5000).contains(&size.0) || !(300..=4000).contains(&size.1) {
+            return;
+        }
+        self.last_window = size;
+        self.pending_window = size;
+        let _ = self
+            .db
+            .set_setting("ui_window_w", &size.0.to_string());
+        let _ = self
+            .db
+            .set_setting("ui_window_h", &size.1.to_string());
+    }
+
+    pub fn set_zoom(&mut self, ctx: &egui::Context, zoom: f32) {
         self.zoom = (zoom * 100.0).round() / 100.0;
         self.zoom = self.zoom.clamp(0.9, 2.0);
         ctx.set_zoom_factor(self.zoom);
@@ -595,6 +683,9 @@ impl App {
             View::Tracker => self.reload_tracker(),
             View::Summary => self.reload_summary(),
             View::Log => self.reload_periods(),
+            View::Settings => {
+                self.settings_needs_sync = true;
+            }
             _ => {}
         }
     }

@@ -354,6 +354,20 @@ impl Db {
         Ok(())
     }
 
+    pub fn reorder_subjects(&self, order: &[i64]) -> Result<()> {
+        anyhow::ensure!(!order.is_empty(), "order required");
+        let tx = self.conn.unchecked_transaction()?;
+        for (n, id) in order.iter().enumerate() {
+            let changed = tx.execute(
+                "UPDATE tracker_subjects SET position=? WHERE id=?",
+                params![n as i64 + 1, id],
+            )?;
+            anyhow::ensure!(changed == 1, "unknown subject id");
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_subject_fields(
         &self,
         id: i64,

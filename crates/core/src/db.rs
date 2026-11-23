@@ -375,6 +375,19 @@ impl Db {
     }
 }
 
+pub fn read_setting(path: &Path, key: &str) -> Option<String> {
+    if !path.exists() {
+        return None;
+    }
+    let conn = Connection::open(path).ok()?;
+    conn.query_row("SELECT value FROM settings WHERE key=?", params![key], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()
+    .ok()
+    .flatten()
+}
+
 pub fn now_iso() -> String {
     Local::now()
         .naive_local()
