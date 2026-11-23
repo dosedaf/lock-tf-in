@@ -87,3 +87,54 @@ impl Db {
         Ok(())
     }
 }
+
+impl Db {
+    pub fn merge_category(&self, from: i64, to: i64) -> Result<()> {
+        anyhow::ensure!(from != to, "cannot merge a category into itself");
+        for id in [from, to] {
+            let exists = self
+                .conn
+                .query_row("SELECT 1 FROM categories WHERE id=?", params![id], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .optional()?;
+            anyhow::ensure!(exists.is_some(), "category not found");
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE pomo_periods SET category_id=? WHERE category_id=?",
+            params![to, from],
+        )?;
+        tx.execute(
+            "UPDATE pomo_sessions SET category_id=? WHERE category_id=?",
+            params![to, from],
+        )?;
+        tx.execute("DELETE FROM categories WHERE id=?", params![from])?;
+        tx.commit()?;
+
+        let mut st = self.pomo_state();
+        if st.category_id == Some(from) {
+            st.category_id = Some(to);
+        }
+        if st.block_category_id == Some(from) {
+            st.block_category_id = Some(to);
+        }
+        self.set_setting("pomo_state", &serde_json::to_string(&st)?)?;
+        Ok(())
+    }
+
+    pub fn assign_unallocated(&self, to: i64) -> Result<usize> {
+        let exists = self
+            .conn
+            .query_row("SELECT 1 FROM categories WHERE id=?", params![to], |r| {
+                r.get::<_, i64>(0)
+            })
+            .optional()?;
+        anyhow::ensure!(exists.is_some(), "category not found");
+        let n = self.conn.execute(
+            "UPDATE pomo_periods SET category_id=? WHERE category_id IS NULL",
+            params![to],
+        )?;
+        Ok(n)
+    }
+}

@@ -314,3 +314,44 @@ fn undo_snapshots_restore_task_period_and_tracker() {
     drop(db);
     cleanup(&path);
 }
+
+#[test]
+fn category_merge_and_unallocated_cleanup() {
+    let (db, path) = temp_db("categories");
+    let a = db.add_category("old").unwrap();
+    let b = db.add_category("new").unwrap();
+    let p1 = db
+        .add_manual_period(
+            "2026-11-22T10:00:00",
+            "2026-11-22T11:00:00",
+            60,
+            Some(a),
+            None,
+        )
+        .unwrap();
+    let p2 = db
+        .add_manual_period("2026-11-22T11:00:00", "2026-11-22T12:00:00", 60, None, None)
+        .unwrap();
+    db.merge_category(a, b).unwrap();
+    assert!(
+        db.periods(365)
+            .unwrap()
+            .into_iter()
+            .find(|p| p.id == p1)
+            .unwrap()
+            .category_id
+            == Some(b)
+    );
+    assert_eq!(db.unallocated_minutes().unwrap(), 60);
+    assert_eq!(db.assign_unallocated(b).unwrap(), 1);
+    assert_eq!(db.unallocated_minutes().unwrap(), 0);
+    let p2 = db
+        .periods(365)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.id == p2)
+        .unwrap();
+    assert_eq!(p2.category_id, Some(b));
+    drop(db);
+    cleanup(&path);
+}

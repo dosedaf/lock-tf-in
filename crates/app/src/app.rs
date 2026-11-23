@@ -128,6 +128,9 @@ pub struct App {
     pub cfg_auto: bool,
     pub cfg_msg: Option<(String, bool, Instant)>,
     pub category_new: String,
+    pub cat_merge_from: Option<i64>,
+    pub cat_merge_to: Option<i64>,
+    pub cat_unalloc_to: Option<i64>,
 
     pub summary: Option<lockin_core::Summary>,
     pub months: Vec<String>,
@@ -284,6 +287,9 @@ impl App {
             cfg_auto: false,
             cfg_msg: None,
             category_new: String::new(),
+            cat_merge_from: None,
+            cat_merge_to: None,
+            cat_unalloc_to: None,
             summary: None,
             months,
             periods: Vec::new(),
@@ -727,15 +733,15 @@ impl App {
         } else if self.palette_index >= filtered.len() {
             self.palette_index = filtered.len() - 1;
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
-            if !filtered.is_empty() {
-                self.palette_index = (self.palette_index + 1) % filtered.len();
-            }
+        if !filtered.is_empty()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown))
+        {
+            self.palette_index = (self.palette_index + 1) % filtered.len();
         }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
-            if !filtered.is_empty() {
-                self.palette_index = (self.palette_index + filtered.len() - 1) % filtered.len();
-            }
+        if !filtered.is_empty()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp))
+        {
+            self.palette_index = (self.palette_index + filtered.len() - 1) % filtered.len();
         }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
             if let Some(item) = filtered.get(self.palette_index) {
@@ -1249,6 +1255,7 @@ impl App {
             View::Log => self.reload_periods(),
             View::Settings => {
                 self.settings_needs_sync = true;
+                self.reload_categories();
             }
             _ => {}
         }

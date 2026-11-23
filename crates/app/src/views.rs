@@ -1531,6 +1531,158 @@ impl App {
             }
         });
         ui.label(theme::i("Ctrl + / Ctrl - / Ctrl 0 also zoom", 11.0).color(theme::DIM));
+        ui.add_space(26.0);
+        ui.label(theme::b("categories", 13.0).color(theme::GOLD));
+        ui.label(theme::i("merge duplicates and clean unallocated time", 11.0).color(theme::MUTED));
+        ui.add_space(6.0);
+        let cats = self.categories.clone();
+        let mut rename: Option<(i64, String)> = None;
+        let mut delete: Option<(i64, String)> = None;
+        let mut do_merge = false;
+        let mut do_assign = false;
+        egui::ScrollArea::vertical()
+            .max_height(150.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                for c in &cats {
+                    ui.horizontal(|ui| {
+                        ui.label(theme::t(&c.name, 12.5).color(theme::GOLD));
+                        ui.label(theme::i(fmt_hm(c.total_min), 11.0).color(theme::MUTED));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if theme::link(ui, "delete", 11.0, theme::RED).clicked() {
+                                delete = Some((c.id, c.name.clone()));
+                            }
+                            if theme::link(ui, "rename", 11.0, theme::RED).clicked() {
+                                rename = Some((c.id, c.name.clone()));
+                            }
+                        });
+                    });
+                }
+            });
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            let selected_from = cats
+                .iter()
+                .find(|c| Some(c.id) == self.cat_merge_from)
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "from…".into());
+            egui::ComboBox::from_id_salt("merge-from")
+                .width(130.0)
+                .selected_text(selected_from)
+                .show_ui(ui, |ui| {
+                    for c in &cats {
+                        if ui
+                            .selectable_label(Some(c.id) == self.cat_merge_from, &c.name)
+                            .clicked()
+                        {
+                            self.cat_merge_from = Some(c.id);
+                        }
+                    }
+                });
+            ui.label(theme::i("→", 12.0).color(theme::MUTED));
+            let selected_to = cats
+                .iter()
+                .find(|c| Some(c.id) == self.cat_merge_to)
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "into…".into());
+            egui::ComboBox::from_id_salt("merge-to")
+                .width(130.0)
+                .selected_text(selected_to)
+                .show_ui(ui, |ui| {
+                    for c in &cats {
+                        if ui
+                            .selectable_label(Some(c.id) == self.cat_merge_to, &c.name)
+                            .clicked()
+                        {
+                            self.cat_merge_to = Some(c.id);
+                        }
+                    }
+                });
+            if theme::link(ui, "merge", 12.0, theme::RED).clicked() {
+                do_merge = true;
+            }
+        });
+        let unalloc = self.db.unallocated_minutes().unwrap_or(0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                theme::i(format!("unallocated: {}", fmt_hm(unalloc)), 11.0).color(theme::MUTED),
+            );
+            let selected = cats
+                .iter()
+                .find(|c| Some(c.id) == self.cat_unalloc_to)
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "assign to…".into());
+            egui::ComboBox::from_id_salt("unalloc-to")
+                .width(130.0)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for c in &cats {
+                        if ui
+                            .selectable_label(Some(c.id) == self.cat_unalloc_to, &c.name)
+                            .clicked()
+                        {
+                            self.cat_unalloc_to = Some(c.id);
+                        }
+                    }
+                });
+            if theme::link(ui, "assign", 12.0, theme::RED).clicked() {
+                do_assign = true;
+            }
+        });
+
+        if let Some((id, name)) = rename {
+            self.open_prompt(
+                DialogKind::RenameCategory(id),
+                "rename category",
+                "name",
+                &name,
+            );
+        }
+        if let Some((id, name)) = delete {
+            let label = format!("delete \"{name}\"? its focus periods become Unallocated.");
+            self.open_prompt(
+                DialogKind::ConfirmDeleteCategory(id),
+                "delete category",
+                &label,
+                "",
+            );
+        }
+        if do_merge {
+            if let (Some(from), Some(to)) = (self.cat_merge_from, self.cat_merge_to) {
+                match self.db.merge_category(from, to) {
+                    Ok(()) => {
+                        self.cat_merge_from = None;
+                        self.cat_merge_to = None;
+                        self.reload_categories();
+                        self.reload_timer();
+                        self.settings_msg =
+                            Some(("categories merged".into(), true, std::time::Instant::now()));
+                    }
+                    Err(e) => {
+                        self.settings_msg = Some((e.to_string(), false, std::time::Instant::now()));
+                    }
+                }
+            }
+        }
+        if do_assign {
+            if let Some(to) = self.cat_unalloc_to {
+                match self.db.assign_unallocated(to) {
+                    Ok(n) => {
+                        self.reload_categories();
+                        self.reload_timer();
+                        self.settings_msg = Some((
+                            format!("assigned {n} unallocated periods"),
+                            true,
+                            std::time::Instant::now(),
+                        ));
+                    }
+                    Err(e) => {
+                        self.settings_msg = Some((e.to_string(), false, std::time::Instant::now()));
+                    }
+                }
+            }
+        }
+
         if let Some((msg, ok, at)) = &self.settings_msg {
             if at.elapsed().as_secs() < 3 {
                 ui.add_space(10.0);
