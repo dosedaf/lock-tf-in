@@ -44,5 +44,6 @@ assets        ceramic.gif, arrow.gif, Liberation Sans, icon
 packaging     desktop entry for installing later
 ```
 
-The original `server.py`, `desktop/lockin-app.py` and the systemd unit are still
-in the repo as the fallback reference. They are not used by the native app.
+The original Python/web version (`server.py`, the GTK/WebKit shell, the systemd
+unit) is no longer in the tree. It lives in git history at `fc21d23` if you ever
+need to look back.
