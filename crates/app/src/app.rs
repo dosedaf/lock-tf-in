@@ -122,6 +122,7 @@ pub struct App {
     pub last_title: String,
     pub toast: Option<(String, Instant)>,
     pub export_month: String,
+    pub zoom: f32,
     pub screenshot_path: Option<std::path::PathBuf>,
     pub frames: u64,
 }
@@ -142,6 +143,12 @@ impl App {
 
         let month = chrono::Local::now().format("%Y-%m").to_string();
         let months = db.months().unwrap_or_default();
+        let zoom: f32 = db
+            .get_setting("ui_zoom")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.3)
+            .clamp(0.9, 2.0);
+        ctx.set_zoom_factor(zoom);
         let group_expanded: HashSet<i64> = db
             .get_setting("tracker_expanded_groups")
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -217,6 +224,7 @@ impl App {
             last_title: String::new(),
             toast: None,
             export_month: month,
+            zoom,
             screenshot_path: std::env::var("LOCKIN_SCREENSHOT")
                 .ok()
                 .filter(|s| !s.is_empty())
@@ -387,7 +395,7 @@ impl App {
                     Vec2::new(full, 36.0),
                     Layout::left_to_right(Align::Center),
                     |ui| {
-                        ui.add_space(24.0);
+                        ui.add_space(16.0);
                         ui.spacing_mut().item_spacing.x = 10.0;
                         ui.label(theme::b("lock tf in", 16.0).color(theme::GOLD));
                         ui.label(
@@ -396,7 +404,7 @@ impl App {
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             self.window_controls(ui);
-                            ui.add_space(18.0);
+                            ui.add_space(14.0);
                         });
                     },
                 );
@@ -414,7 +422,7 @@ impl App {
                     Vec2::new(full, 34.0),
                     Layout::left_to_right(Align::Center),
                     |ui| {
-                        ui.add_space(24.0);
+                        ui.add_space(16.0);
                         ui.spacing_mut().item_spacing.x = 18.0;
                         for (view, label) in [
                             (View::Tasks, "tasks"),
@@ -440,7 +448,7 @@ impl App {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let pad = 24.0;
+                        let pad = 16.0;
                         let content_width = (full - pad * 2.0).max(240.0);
                         ui.horizontal(|ui| {
                             ui.add_space(pad);
@@ -459,6 +467,31 @@ impl App {
                         });
                     });
             });
+
+        // custom 1998 window bevel, no OS decorations
+        let border = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("window-border"),
+        ));
+        let screen = ctx.screen_rect();
+        border.rect_stroke(
+            screen,
+            0.0,
+            Stroke::new(1.0_f32, egui::Color32::BLACK),
+            egui::StrokeKind::Inside,
+        );
+        border.rect_stroke(
+            screen.shrink(1.0),
+            0.0,
+            Stroke::new(1.0_f32, egui::Color32::from_rgb(0x3a, 0x24, 0x00)),
+            egui::StrokeKind::Inside,
+        );
+        border.rect_stroke(
+            screen.shrink(2.0),
+            0.0,
+            Stroke::new(1.0_f32, egui::Color32::BLACK),
+            egui::StrokeKind::Inside,
+        );
 
         self.task_menu_window(ctx);
         self.tracker_menu_window(ctx);
@@ -524,6 +557,12 @@ impl App {
             } else if ctx.input(|i| i.key_pressed(egui::Key::Q)) {
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else if ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)) {
+                self.set_zoom(ctx, self.zoom + 0.1);
+            } else if ctx.input(|i| i.key_pressed(egui::Key::Minus)) {
+                self.set_zoom(ctx, self.zoom - 0.1);
+            } else if ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
+                self.set_zoom(ctx, 1.3);
             }
         }
         if !typing && ctx.input(|i| i.key_pressed(egui::Key::Space)) {
@@ -536,6 +575,16 @@ impl App {
             self.reload_timer();
             self.reload_tasks();
         }
+    }
+
+    fn set_zoom(&mut self, ctx: &egui::Context, zoom: f32) {
+        self.zoom = (zoom * 100.0).round() / 100.0;
+        self.zoom = self.zoom.clamp(0.9, 2.0);
+        ctx.set_zoom_factor(self.zoom);
+        let _ = self
+            .db
+            .set_setting("ui_zoom", &format!("{:.2}", self.zoom));
+        ctx.request_repaint();
     }
 
     fn set_view(&mut self, view: View) {
