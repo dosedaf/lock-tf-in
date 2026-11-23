@@ -267,6 +267,54 @@ impl Db {
         Ok(())
     }
 
+    pub fn period_snapshot(&self, id: i64) -> Result<Option<crate::model::PeriodSnapshot>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id, session_id, day_id, category_id, subject_id, task_id, task_label, minutes, started_at, ended_at, source \
+                 FROM pomo_periods WHERE id=?",
+                params![id],
+                |r| {
+                    Ok(crate::model::PeriodSnapshot {
+                        id: r.get(0)?,
+                        session_id: r.get(1)?,
+                        day_id: r.get(2)?,
+                        category_id: r.get(3)?,
+                        subject_id: r.get(4)?,
+                        task_id: r.get(5)?,
+                        task_label: r.get(6)?,
+                        minutes: r.get(7)?,
+                        started_at: r.get(8)?,
+                        ended_at: r.get(9)?,
+                        source: r.get(10)?,
+                    })
+                },
+            )
+            .optional()?)
+    }
+
+    pub fn restore_period(&self, p: &crate::model::PeriodSnapshot) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pomo_periods \
+             (id, session_id, day_id, category_id, subject_id, task_id, task_label, minutes, started_at, ended_at, source) \
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            params![
+                p.id,
+                p.session_id,
+                p.day_id,
+                p.category_id,
+                p.subject_id,
+                p.task_id,
+                p.task_label,
+                p.minutes,
+                p.started_at,
+                p.ended_at,
+                p.source
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn delete_period(&self, id: i64) -> Result<()> {
         let n = self
             .conn

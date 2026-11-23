@@ -241,3 +241,76 @@ fn manual_period_add_update_and_summary() {
     drop(db);
     cleanup(&path);
 }
+
+#[test]
+fn undo_snapshots_restore_task_period_and_tracker() {
+    let (db, path) = temp_db("undo");
+    let t = db.add_task("undo me", "details").unwrap();
+    let task = db.tasks().unwrap().into_iter().find(|x| x.id == t).unwrap();
+    db.delete_task(t).unwrap();
+    assert!(db.task_by_id(t).unwrap().is_none());
+    db.restore_task(&task).unwrap();
+    let restored = db.task_by_id(t).unwrap().unwrap();
+    assert_eq!(restored.text, "undo me");
+    assert_eq!(restored.details, "details");
+
+    let cat = db.add_category("work").unwrap();
+    let p = db
+        .add_manual_period(
+            "2026-11-22T14:00:00",
+            "2026-11-22T15:00:00",
+            60,
+            Some(cat),
+            None,
+        )
+        .unwrap();
+    let snapshot = db.period_snapshot(p).unwrap().unwrap();
+    db.delete_period(p).unwrap();
+    assert!(db.period_snapshot(p).unwrap().is_none());
+    db.restore_period(&snapshot).unwrap();
+    assert_eq!(db.period_snapshot(p).unwrap().unwrap().minutes, 60);
+
+    let g = db.add_group("g").unwrap();
+    let s = db.add_subject(g, "s", "other", "", "", None).unwrap();
+    db.subject_progress(s, Some(5.0), None, "").unwrap();
+    let before = db
+        .tracker_payload()
+        .unwrap()
+        .groups
+        .into_iter()
+        .flat_map(|g| g.subjects)
+        .find(|x| x.id == s)
+        .unwrap();
+    let log_id = db.last_progress_log_id(s).unwrap();
+    db.subject_state(s, "done").unwrap();
+    db.restore_subject_state(
+        s,
+        "doing",
+        before.started_at.as_deref(),
+        None,
+        before.last_touched.as_deref(),
+    )
+    .unwrap();
+    let current = db
+        .tracker_payload()
+        .unwrap()
+        .groups
+        .into_iter()
+        .flat_map(|g| g.subjects)
+        .find(|x| x.id == s)
+        .unwrap();
+    assert_eq!(current.state, "doing");
+    db.restore_subject_progress(s, before.unit_done, &before.state, log_id)
+        .unwrap();
+    let current = db
+        .tracker_payload()
+        .unwrap()
+        .groups
+        .into_iter()
+        .flat_map(|g| g.subjects)
+        .find(|x| x.id == s)
+        .unwrap();
+    assert!((current.unit_done - before.unit_done).abs() < 0.001);
+    drop(db);
+    cleanup(&path);
+}

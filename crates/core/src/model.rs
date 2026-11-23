@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default)]
 pub struct Task {
     pub id: i64,
+    pub day_id: i64,
     pub text: String,
     pub details: String,
     pub state: String,
@@ -172,6 +173,21 @@ pub struct Summary {
     pub weeks: Vec<Bucket>,
     pub months: Vec<Bucket>,
     pub hours: Vec<i64>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PeriodSnapshot {
+    pub id: i64,
+    pub session_id: Option<i64>,
+    pub day_id: Option<i64>,
+    pub category_id: Option<i64>,
+    pub subject_id: Option<i64>,
+    pub task_id: Option<i64>,
+    pub task_label: String,
+    pub minutes: i64,
+    pub started_at: String,
+    pub ended_at: String,
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Default)]

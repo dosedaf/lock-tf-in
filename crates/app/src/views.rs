@@ -414,10 +414,16 @@ impl App {
                         order.iter().position(|id| *id == from),
                         order.iter().position(|id| *id == to),
                     ) {
+                        let before = order.clone();
                         let id = order.remove(f);
                         order.insert(t, id);
-                        let _ = self.db.reorder_groups(&order);
-                        self.reload_tracker();
+                        if self.db.reorder_groups(&order).is_ok() {
+                            self.set_undo(
+                                crate::app::UndoAction::GroupOrder(before),
+                                "groups reordered",
+                            );
+                            self.reload_tracker();
+                        }
                     }
                 }
             }
@@ -433,10 +439,16 @@ impl App {
                         order.iter().position(|id| *id == from),
                         order.iter().position(|id| *id == to),
                     ) {
+                        let before = order.clone();
                         let id = order.remove(f);
                         order.insert(t, id);
-                        let _ = self.db.reorder_subjects(&order);
-                        self.reload_tracker();
+                        if self.db.reorder_subjects(&order).is_ok() {
+                            self.set_undo(
+                                crate::app::UndoAction::SubjectOrder(before),
+                                "subjects reordered",
+                            );
+                            self.reload_tracker();
+                        }
                     }
                 }
             }
@@ -900,8 +912,11 @@ impl App {
                 "dropped" => "todo",
                 _ => "todo",
             };
-            let _ = self.db.subject_state(subject.id, next);
-            self.reload_tracker();
+            let undo = self.subject_state_undo(subject);
+            if self.db.subject_state(subject.id, next).is_ok() {
+                self.set_undo(undo, "tracker state changed");
+                self.reload_tracker();
+            }
         }
 
         let text_x = glyph_rect.right() + 8.0;
@@ -1105,11 +1120,18 @@ impl App {
                     );
                     if theme::link(ui, "set", 12.0, theme::RED).clicked() {
                         if let Ok(value) = self.trk_set.trim().parse::<f64>() {
-                            let _ = self
+                            let undo = self.progress_undo(subject);
+                            if self
                                 .db
-                                .subject_progress(subject.id, None, Some(value), "ui");
-                            self.trk_set.clear();
-                            self.reload_tracker();
+                                .subject_progress(subject.id, None, Some(value), "ui")
+                                .is_ok()
+                            {
+                                if let Some(undo) = undo {
+                                    self.set_undo(undo, "progress set");
+                                }
+                                self.trk_set.clear();
+                                self.reload_tracker();
+                            }
                         }
                     }
                     ui.label(theme::i("absolute value", 10.5).color(theme::DIM));
@@ -1324,7 +1346,7 @@ impl App {
             ));
             return;
         };
-        let minutes = (end - start).num_minutes() as i64;
+        let minutes = (end - start).num_minutes();
         if !(1..=1440).contains(&minutes) {
             self.log_msg = Some((
                 "duration must be 1..1440 minutes".into(),
@@ -1335,6 +1357,10 @@ impl App {
         }
         let started_at = start.format("%Y-%m-%dT%H:%M:%S").to_string();
         let ended_at = end.format("%Y-%m-%dT%H:%M:%S").to_string();
+        let previous = self
+            .log_editing
+            .and_then(|id| self.db.period_snapshot(id).ok().flatten());
+        let mut added: Option<i64> = None;
         let result = if let Some(id) = self.log_editing {
             self.db.update_manual_period(
                 id,
@@ -1345,18 +1371,27 @@ impl App {
                 self.log_subject,
             )
         } else {
-            self.db
-                .add_manual_period(
-                    &started_at,
-                    &ended_at,
-                    minutes,
-                    self.log_category,
-                    self.log_subject,
-                )
-                .map(|_| ())
+            match self.db.add_manual_period(
+                &started_at,
+                &ended_at,
+                minutes,
+                self.log_category,
+                self.log_subject,
+            ) {
+                Ok(id) => {
+                    added = Some(id);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
         };
         match result {
             Ok(()) => {
+                if let Some(prev) = previous {
+                    self.set_undo(crate::app::UndoAction::Period(prev), "period updated");
+                } else if let Some(id) = added {
+                    self.set_undo(crate::app::UndoAction::PeriodDelete(id), "period logged");
+                }
                 self.reload_periods();
                 self.log_msg = Some((
                     format!(
@@ -1745,10 +1780,15 @@ impl App {
                 }
             }
             if let Some(id) = delete {
-                let _ = self.db.delete_period(id);
-                self.reload_periods();
-                if self.log_editing == Some(id) {
-                    self.log_editing = None;
+                let undo = self.db.period_snapshot(id).ok().flatten();
+                if self.db.delete_period(id).is_ok() {
+                    if let Some(undo) = undo {
+                        self.set_undo(crate::app::UndoAction::Period(undo), "period deleted");
+                    }
+                    self.reload_periods();
+                    if self.log_editing == Some(id) {
+                        self.log_editing = None;
+                    }
                 }
             }
         }

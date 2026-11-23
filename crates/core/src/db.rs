@@ -254,17 +254,18 @@ impl Db {
 
     pub fn tasks(&self) -> Result<Vec<Task>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, text, details, state, position, done_at FROM tasks \
+            "SELECT id, day_id, text, details, state, position, done_at FROM tasks \
              ORDER BY CASE state WHEN 'doing' THEN 0 WHEN 'todo' THEN 1 ELSE 2 END, position",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(Task {
                 id: r.get(0)?,
-                text: r.get(1)?,
-                details: r.get(2)?,
-                state: r.get(3)?,
-                position: r.get(4)?,
-                done_at: r.get(5)?,
+                day_id: r.get(1)?,
+                text: r.get(2)?,
+                details: r.get(3)?,
+                state: r.get(4)?,
+                position: r.get(5)?,
+                done_at: r.get(6)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -341,6 +342,44 @@ impl Db {
             rusqlite::params_from_iter(values),
         )?;
         Ok(())
+    }
+
+    pub fn restore_task(&self, task: &Task) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO tasks (id, day_id, text, details, state, position, done_at) \
+             VALUES (?,?,?,?,?,?,?)",
+            params![
+                task.id,
+                task.day_id,
+                task.text,
+                task.details,
+                task.state,
+                task.position,
+                task.done_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn task_by_id(&self, id: i64) -> Result<Option<Task>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id, day_id, text, details, state, position, done_at FROM tasks WHERE id=?",
+                params![id],
+                |r| {
+                    Ok(Task {
+                        id: r.get(0)?,
+                        day_id: r.get(1)?,
+                        text: r.get(2)?,
+                        details: r.get(3)?,
+                        state: r.get(4)?,
+                        position: r.get(5)?,
+                        done_at: r.get(6)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     pub fn delete_task(&self, id: i64) -> Result<()> {

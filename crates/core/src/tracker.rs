@@ -340,6 +340,58 @@ impl Db {
         Ok(new_done)
     }
 
+    pub fn restore_subject_state(
+        &self,
+        id: i64,
+        state: &str,
+        started_at: Option<&str>,
+        finished_at: Option<&str>,
+        last_touched: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tracker_subjects SET state=?, started_at=?, finished_at=?, last_touched=? WHERE id=?",
+            params![state, started_at, finished_at, last_touched, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn last_progress_log_id(&self, subject_id: i64) -> Result<Option<i64>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id FROM tracker_progress_log WHERE subject_id=? ORDER BY id DESC LIMIT 1",
+                params![subject_id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn restore_subject_progress(
+        &self,
+        id: i64,
+        unit_done: f64,
+        state: &str,
+        remove_log: Option<i64>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tracker_subjects SET unit_done=?, state=? WHERE id=?",
+            params![unit_done, state, id],
+        )?;
+        if let Some(log) = remove_log {
+            self.conn
+                .execute("DELETE FROM tracker_progress_log WHERE id=?", params![log])?;
+        }
+        Ok(())
+    }
+
+    pub fn restore_snooze(&self, id: i64, until: Option<&str>, reason: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE tracker_subjects SET snooze_until=?, snooze_reason=? WHERE id=?",
+            params![until, reason, id],
+        )?;
+        Ok(())
+    }
+
     pub fn subject_state(&self, id: i64, state: &str) -> Result<()> {
         if !TRACKER_STATES.contains(&state) {
             bail!("invalid state");

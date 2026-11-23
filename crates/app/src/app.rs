@@ -5,7 +5,7 @@ use eframe::egui::{
     self, Align, Color32, FontId, Layout, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions,
     Ui, Vec2,
 };
-use lockin_core::{Category, Db, PomoView, Task};
+use lockin_core::{Category, Db, PeriodSnapshot, PomoView, Task};
 
 use crate::theme;
 use crate::views;
@@ -21,6 +21,40 @@ pub enum View {
     Summary,
     Log,
     Settings,
+}
+
+#[derive(Clone)]
+pub enum UndoAction {
+    Task(Task),
+    Period(PeriodSnapshot),
+    PeriodDelete(i64),
+    SubjectState {
+        id: i64,
+        state: String,
+        started_at: Option<String>,
+        finished_at: Option<String>,
+        last_touched: Option<String>,
+    },
+    SubjectProgress {
+        id: i64,
+        unit_done: f64,
+        state: String,
+        log_id: Option<i64>,
+    },
+    Snooze {
+        id: i64,
+        until: Option<String>,
+        reason: String,
+    },
+    TaskOrder(Vec<i64>),
+    SubjectOrder(Vec<i64>),
+    GroupOrder(Vec<i64>),
+}
+
+pub struct Toast {
+    pub text: String,
+    pub at: Instant,
+    pub undo: bool,
 }
 
 #[derive(Clone)]
@@ -119,7 +153,8 @@ pub struct App {
     pub ceramic: TextureHandle,
     pub arrow: TextureHandle,
     pub last_title: String,
-    pub toast: Option<(String, Instant)>,
+    pub toast: Option<Toast>,
+    pub last_undo: Option<UndoAction>,
     pub export_month: String,
     pub zoom: f32,
     pub settings_w: String,
@@ -268,6 +303,7 @@ impl App {
             arrow,
             last_title: String::new(),
             toast: None,
+            last_undo: None,
             export_month: month,
             zoom,
             settings_w: saved_w.to_string(),
@@ -395,7 +431,144 @@ impl App {
     }
 
     pub fn toast(&mut self, text: impl Into<String>) {
-        self.toast = Some((text.into(), Instant::now()));
+        self.toast = Some(Toast {
+            text: text.into(),
+            at: Instant::now(),
+            undo: false,
+        });
+    }
+
+    pub fn set_undo(&mut self, action: UndoAction, text: impl Into<String>) {
+        self.last_undo = Some(action);
+        self.toast = Some(Toast {
+            text: text.into(),
+            at: Instant::now(),
+            undo: true,
+        });
+    }
+
+    pub fn subject_state_undo(&self, subject: &lockin_core::TrackerSubject) -> UndoAction {
+        UndoAction::SubjectState {
+            id: subject.id,
+            state: subject.state.clone(),
+            started_at: subject.started_at.clone(),
+            finished_at: subject.finished_at.clone(),
+            last_touched: subject.last_touched.clone(),
+        }
+    }
+
+    pub fn progress_undo(&self, subject: &lockin_core::TrackerSubject) -> Option<UndoAction> {
+        let log_id = self.db.last_progress_log_id(subject.id).ok().flatten();
+        Some(UndoAction::SubjectProgress {
+            id: subject.id,
+            unit_done: subject.unit_done,
+            state: subject.state.clone(),
+            log_id,
+        })
+    }
+
+    fn perform_undo(&mut self) {
+        let Some(action) = self.last_undo.take() else {
+            return;
+        };
+        match action {
+            UndoAction::Task(task) => {
+                let _ = self.db.restore_task(&task);
+                self.reload_tasks();
+            }
+            UndoAction::Period(p) => {
+                let _ = self.db.restore_period(&p);
+                self.reload_periods();
+                self.reload_timer();
+            }
+            UndoAction::PeriodDelete(id) => {
+                let _ = self.db.delete_period(id);
+                self.reload_periods();
+                self.reload_timer();
+            }
+            UndoAction::SubjectState {
+                id,
+                state,
+                started_at,
+                finished_at,
+                last_touched,
+            } => {
+                let _ = self.db.restore_subject_state(
+                    id,
+                    &state,
+                    started_at.as_deref(),
+                    finished_at.as_deref(),
+                    last_touched.as_deref(),
+                );
+                self.reload_tracker();
+            }
+            UndoAction::SubjectProgress {
+                id,
+                unit_done,
+                state,
+                log_id,
+            } => {
+                let _ = self
+                    .db
+                    .restore_subject_progress(id, unit_done, &state, log_id);
+                self.reload_tracker();
+            }
+            UndoAction::Snooze { id, until, reason } => {
+                let _ = self.db.restore_snooze(id, until.as_deref(), &reason);
+                self.reload_tracker();
+            }
+            UndoAction::TaskOrder(order) => {
+                let _ = self.db.reorder_tasks(&order);
+                self.reload_tasks();
+            }
+            UndoAction::SubjectOrder(order) => {
+                let _ = self.db.reorder_subjects(&order);
+                self.reload_tracker();
+            }
+            UndoAction::GroupOrder(order) => {
+                let _ = self.db.reorder_groups(&order);
+                self.reload_tracker();
+            }
+        }
+        self.toast("undone");
+    }
+
+    fn toast_window(&mut self, ctx: &egui::Context) {
+        let Some(toast) = &self.toast else {
+            return;
+        };
+        if toast.at.elapsed() > Duration::from_secs(5) {
+            self.toast = None;
+            self.last_undo = None;
+            return;
+        }
+        let text = toast.text.clone();
+        let can_undo = toast.undo;
+        let mut clicked = false;
+        egui::Area::new(egui::Id::new("toast"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::RIGHT_BOTTOM, [-18.0, -18.0])
+            .fade_in(false)
+            .show(ctx, |ui| {
+                theme::textured_panel(
+                    ui,
+                    self.ceramic.id(),
+                    None,
+                    egui::Margin::symmetric(12, 8),
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(theme::t(text, 12.0).color(theme::BRIGHT));
+                            if can_undo && theme::link(ui, "undo", 12.0, theme::RED).clicked() {
+                                clicked = true;
+                            }
+                        });
+                    },
+                );
+            });
+        if clicked {
+            self.perform_undo();
+        }
+        ctx.request_repaint_after(Duration::from_millis(250));
     }
 
     // ---------------------------------------------------------------- update
@@ -576,15 +749,8 @@ impl App {
             self.settings_popup(ctx);
         }
         self.dialog_window(ctx);
+        self.toast_window(ctx);
         self.maybe_screenshot(ctx);
-
-        if let Some((_, at)) = &self.toast {
-            if at.elapsed() > Duration::from_secs(3) {
-                self.toast = None;
-            } else {
-                ctx.request_repaint_after(Duration::from_millis(200));
-            }
-        }
     }
 
     fn maybe_screenshot(&mut self, ctx: &egui::Context) {
@@ -1161,9 +1327,12 @@ impl App {
                 "doing" => "done",
                 _ => "todo",
             };
-            let _ = self.db.patch_task(task.id, None, None, Some(next));
-            self.reload_tasks();
-            self.reload_timer();
+            let prev = task.clone();
+            if self.db.patch_task(task.id, None, None, Some(next)).is_ok() {
+                self.set_undo(UndoAction::Task(prev), "task state changed");
+                self.reload_tasks();
+                self.reload_timer();
+            }
         }
         if glyph_resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1229,10 +1398,18 @@ impl App {
         };
         theme::paint_x(ui.painter(), x_rect.center(), 7.0, x_color);
         if x_resp.clicked() {
-            let _ = self.db.delete_task(task.id);
-            self.reload_tasks();
-            if self.edit_id == Some(task.id) {
-                self.edit_id = None;
+            let prev = self
+                .db
+                .task_by_id(task.id)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| task.clone());
+            if self.db.delete_task(task.id).is_ok() {
+                self.set_undo(UndoAction::Task(prev), "task deleted");
+                self.reload_tasks();
+                if self.edit_id == Some(task.id) {
+                    self.edit_id = None;
+                }
             }
         }
         if x_resp.hovered() {
@@ -1256,10 +1433,13 @@ impl App {
                         order.iter().position(|id| *id == from),
                         order.iter().position(|id| *id == to),
                     ) {
+                        let before = order.clone();
                         let id = order.remove(f);
                         order.insert(t, id);
-                        let _ = self.db.reorder_tasks(&order);
-                        self.reload_tasks();
+                        if self.db.reorder_tasks(&order).is_ok() {
+                            self.set_undo(UndoAction::TaskOrder(before), "tasks reordered");
+                            self.reload_tasks();
+                        }
                     }
                 }
             }
@@ -1298,8 +1478,9 @@ impl App {
                         .font(theme::regular_font(13.0)),
                 );
                 ui.horizontal(|ui| {
-                    if theme::link(ui, "save", 13.0, theme::RED).clicked()
-                        && self
+                    if theme::link(ui, "save", 13.0, theme::RED).clicked() {
+                        let prev = task.clone();
+                        if self
                             .db
                             .patch_task(
                                 task.id,
@@ -1308,9 +1489,11 @@ impl App {
                                 None,
                             )
                             .is_ok()
-                    {
-                        self.reload_tasks();
-                        self.edit_saved_until = Some(Instant::now());
+                        {
+                            self.set_undo(UndoAction::Task(prev), "task updated");
+                            self.reload_tasks();
+                            self.edit_saved_until = Some(Instant::now());
+                        }
                     }
                     if self
                         .edit_saved_until
@@ -1363,15 +1546,25 @@ impl App {
                 });
             });
         if let Some(state) = new_state {
-            let _ = self.db.patch_task(id, None, None, Some(state));
-            self.reload_tasks();
-            self.reload_timer();
+            let prev = self.db.task_by_id(id).ok().flatten();
+            if self.db.patch_task(id, None, None, Some(state)).is_ok() {
+                if let Some(prev) = prev {
+                    self.set_undo(UndoAction::Task(prev), "task state changed");
+                }
+                self.reload_tasks();
+                self.reload_timer();
+            }
         }
         if delete {
-            let _ = self.db.delete_task(id);
-            self.reload_tasks();
-            if self.edit_id == Some(id) {
-                self.edit_id = None;
+            let prev = self.db.task_by_id(id).ok().flatten();
+            if self.db.delete_task(id).is_ok() {
+                if let Some(prev) = prev {
+                    self.set_undo(UndoAction::Task(prev), "task deleted");
+                }
+                self.reload_tasks();
+                if self.edit_id == Some(id) {
+                    self.edit_id = None;
+                }
             }
         }
         let menu_rect = area.response.rect.expand(8.0);
@@ -1447,12 +1640,22 @@ impl App {
                 });
             });
         if let Some(state) = set_state {
-            let _ = self.db.subject_state(id, state);
-            self.reload_tracker();
+            let undo = self.subject_state_undo(&subject);
+            if self.db.subject_state(id, state).is_ok() {
+                self.set_undo(undo, "tracker state changed");
+                self.reload_tracker();
+            }
         }
         if clear_snooze {
-            let _ = self.db.snooze_subject(id, None, None, "", true);
-            self.reload_tracker();
+            let undo = UndoAction::Snooze {
+                id,
+                until: subject.snooze_until.clone(),
+                reason: subject.snooze_reason.clone(),
+            };
+            if self.db.snooze_subject(id, None, None, "", true).is_ok() {
+                self.set_undo(undo, "snooze cleared");
+                self.reload_tracker();
+            }
         }
         if delete {
             self.open_prompt(
@@ -1586,7 +1789,24 @@ impl App {
             }
             DialogKind::SnoozeDays(id) => {
                 let days: i64 = text.parse()?;
+                let prev = self.tracker.as_ref().and_then(|t| {
+                    t.groups
+                        .iter()
+                        .flat_map(|g| g.subjects.iter())
+                        .find(|s| s.id == *id)
+                        .cloned()
+                });
                 self.db.snooze_subject(*id, Some(days), None, "", false)?;
+                if let Some(prev) = prev {
+                    self.set_undo(
+                        UndoAction::Snooze {
+                            id: *id,
+                            until: prev.snooze_until,
+                            reason: prev.snooze_reason,
+                        },
+                        "snoozed",
+                    );
+                }
                 self.reload_tracker();
             }
             DialogKind::ConfirmDeleteGroup(id) => {
