@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -12,6 +13,12 @@ use crate::views;
 
 pub static QUIT_REQUESTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HeatmapMode {
+    Calendar,
+    SinceFirst,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum View {
@@ -134,6 +141,11 @@ pub struct App {
 
     pub summary: Option<lockin_core::Summary>,
     pub summary_range: Option<i64>,
+    pub heatmap_mode: HeatmapMode,
+    pub heatmap_year: i32,
+    pub heatmap_years: Vec<i32>,
+    pub heatmap: Vec<lockin_core::HeatmapDay>,
+    pub heatmap_label: String,
     pub months: Vec<String>,
     pub periods: Vec<lockin_core::PeriodRow>,
     pub periods_loaded: bool,
@@ -240,6 +252,11 @@ impl App {
             .unwrap_or(780)
             .clamp(620, 3000);
         let always_on_top = db.get_setting_or("ui_always_on_top", "0") == "1";
+        let heatmap_mode = if db.get_setting_or("ui_heatmap_mode", "calendar") == "first" {
+            HeatmapMode::SinceFirst
+        } else {
+            HeatmapMode::Calendar
+        };
         let zoom: f32 = db
             .get_setting("ui_zoom")
             .and_then(|s| s.parse::<f32>().ok())
@@ -295,6 +312,15 @@ impl App {
             cat_unalloc_to: None,
             summary: None,
             summary_range: Some(30),
+            heatmap_mode,
+            heatmap_year: chrono::Local::now()
+                .format("%Y")
+                .to_string()
+                .parse()
+                .unwrap_or(2026),
+            heatmap_years: Vec::new(),
+            heatmap: Vec::new(),
+            heatmap_label: String::new(),
             months,
             periods: Vec::new(),
             periods_loaded: false,
@@ -389,7 +415,10 @@ impl App {
         }
         match app.view {
             View::Tracker => app.reload_tracker(),
-            View::Summary => app.reload_summary(),
+            View::Summary => {
+                app.reload_summary();
+                app.reload_heatmap();
+            }
             View::Log => app.reload_periods(),
             _ => {}
         }
@@ -456,6 +485,39 @@ impl App {
     pub fn reload_summary(&mut self) {
         self.summary = self.db.summary_range(self.summary_range).ok();
         self.months = self.db.months().unwrap_or_default();
+    }
+
+    pub fn reload_heatmap(&mut self) {
+        let today = chrono::Local::now().date_naive();
+        let years = self
+            .db
+            .heatmap_years()
+            .unwrap_or_else(|_| vec![today.year()]);
+        self.heatmap_years = years.clone();
+        if !years.contains(&self.heatmap_year) {
+            self.heatmap_year = today.year().clamp(
+                *years.first().unwrap_or(&today.year()),
+                *years.last().unwrap_or(&today.year()),
+            );
+            if !years.contains(&self.heatmap_year) {
+                self.heatmap_year = *years.first().unwrap_or(&today.year());
+            }
+        }
+        let first = self.db.first_period_date().ok().flatten().unwrap_or(today);
+        let (start, end, label) = match self.heatmap_mode {
+            HeatmapMode::Calendar => {
+                let y = self.heatmap_year;
+                let start = chrono::NaiveDate::from_ymd_opt(y, 1, 1).unwrap_or(today);
+                let end = chrono::NaiveDate::from_ymd_opt(y, 12, 31).unwrap_or(today);
+                (start, end, format!("{y}"))
+            }
+            HeatmapMode::SinceFirst => {
+                let end = first + chrono::Duration::days(364);
+                (first, end, format!("{} → {}", first, end))
+            }
+        };
+        self.heatmap = self.db.heatmap_range(start, end).unwrap_or_default();
+        self.heatmap_label = label;
     }
 
     pub fn reload_periods(&mut self) {
@@ -908,7 +970,10 @@ impl App {
         if self.last_view_refresh.elapsed() >= Duration::from_millis(2000) {
             match self.view {
                 View::Tracker => self.reload_tracker(),
-                View::Summary => self.reload_summary(),
+                View::Summary => {
+                    self.reload_summary();
+                    self.reload_heatmap();
+                }
                 View::Log if self.periods_loaded => self.reload_periods(),
                 _ => {}
             }
@@ -1270,7 +1335,10 @@ impl App {
         self.tracker_menu = None;
         match view {
             View::Tracker => self.reload_tracker(),
-            View::Summary => self.reload_summary(),
+            View::Summary => {
+                self.reload_summary();
+                self.reload_heatmap();
+            }
             View::Log => self.reload_periods(),
             View::Settings => {
                 self.settings_needs_sync = true;

@@ -1206,116 +1206,224 @@ impl App {
             ui.label(theme::i("current streak", 11.0).color(theme::MUTED));
         });
 
+        let mut new_mode: Option<crate::app::HeatmapMode> = None;
+        let mut new_year: Option<i32> = None;
         ui.add_space(18.0);
-        ui.label(theme::b("hourly", 13.0).color(theme::GOLD));
-        let hours = summary.hours.clone();
-        let max_hour = hours.iter().copied().max().unwrap_or(0).max(1) as f32;
-        let (chart_rect, _) = ui.allocate_exact_size(
-            egui::Vec2::new(ui.available_width(), 78.0),
-            egui::Sense::hover(),
-        );
-        let base_y = chart_rect.bottom() - 15.0;
-        let slot = chart_rect.width() / 24.0;
-        for h in 0..24 {
-            let v = *hours.get(h).unwrap_or(&0) as f32;
-            let bh = if v > 0.0 {
-                (v / max_hour) * (chart_rect.height() - 24.0)
-            } else {
-                0.0
-            };
-            let x = chart_rect.left() + h as f32 * slot + 1.0;
-            let bar = egui::Rect::from_min_max(
-                egui::Pos2::new(x, base_y - bh),
-                egui::Pos2::new(x + (slot - 2.0).max(1.0), base_y),
-            );
-            ui.painter().rect_filled(
-                bar,
-                0.0,
-                if v > 0.0 {
-                    theme::GOLD
+        ui.horizontal(|ui| {
+            ui.label(theme::b("heatmap", 13.0).color(theme::GOLD));
+            for (mode, label) in [
+                (crate::app::HeatmapMode::Calendar, "jan 1"),
+                (crate::app::HeatmapMode::SinceFirst, "first session"),
+            ] {
+                let current = self.heatmap_mode == mode;
+                let color = if current { theme::BRIGHT } else { theme::RED };
+                if theme::link(ui, label, 11.5, color).clicked() && !current {
+                    new_mode = Some(mode);
+                }
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.label(theme::i("more", 9.5).color(theme::DIM));
+                for color in [
+                    egui::Color32::from_rgb(0xd8, 0xa2, 0x48),
+                    egui::Color32::from_rgb(0xa8, 0x78, 0x30),
+                    egui::Color32::from_rgb(0x7a, 0x56, 0x20),
+                    egui::Color32::from_rgb(0x4a, 0x34, 0x14),
+                ] {
+                    let (r, _) =
+                        ui.allocate_exact_size(egui::Vec2::splat(8.0), egui::Sense::hover());
+                    ui.painter().rect_filled(r, 0.0, color);
+                }
+                ui.label(theme::i("less", 9.5).color(theme::DIM));
+                ui.add_space(14.0);
+                if self.heatmap_mode == crate::app::HeatmapMode::Calendar {
+                    if theme::link(ui, "›", 12.0, theme::RED).clicked() {
+                        if let Some(idx) = self
+                            .heatmap_years
+                            .iter()
+                            .position(|y| *y == self.heatmap_year)
+                        {
+                            if idx + 1 < self.heatmap_years.len() {
+                                new_year = Some(self.heatmap_years[idx + 1]);
+                            }
+                        }
+                    }
+                    ui.label(theme::b(self.heatmap_year.to_string(), 12.0).color(theme::BRIGHT));
+                    if theme::link(ui, "‹", 12.0, theme::RED).clicked() {
+                        if let Some(idx) = self
+                            .heatmap_years
+                            .iter()
+                            .position(|y| *y == self.heatmap_year)
+                        {
+                            if idx > 0 {
+                                new_year = Some(self.heatmap_years[idx - 1]);
+                            }
+                        }
+                    }
                 } else {
-                    egui::Color32::from_rgb(0x2a, 0x1a, 0x08)
+                    ui.label(theme::i(self.heatmap_label.clone(), 10.5).color(theme::MUTED));
+                }
+            });
+        });
+        if let Some(mode) = new_mode {
+            self.heatmap_mode = mode;
+            let _ = self.db.set_setting(
+                "ui_heatmap_mode",
+                if mode == crate::app::HeatmapMode::SinceFirst {
+                    "first"
+                } else {
+                    "calendar"
                 },
             );
-            let resp = ui.interact(
-                bar.expand(1.0),
-                ui.id().with(("hour", h)),
-                egui::Sense::hover(),
-            );
-            resp.on_hover_text(format!("{h:02}:00 — {}m", hours[h]));
+            self.reload_heatmap();
         }
-        for h in [0usize, 6, 12, 18, 23] {
-            let x = chart_rect.left() + h as f32 * slot + 1.0;
-            ui.painter().text(
-                egui::Pos2::new(x, chart_rect.bottom() - 2.0),
-                egui::Align2::LEFT_BOTTOM,
-                format!("{h:02}"),
-                theme::italic_font(9.0),
-                theme::DIM,
-            );
+        if let Some(year) = new_year {
+            self.heatmap_year = year;
+            self.reload_heatmap();
         }
-        ui.painter().line_segment(
-            [
-                egui::Pos2::new(chart_rect.left(), base_y),
-                egui::Pos2::new(chart_rect.right(), base_y),
-            ],
-            egui::Stroke::new(1.0_f32, theme::LINE_SOFT),
-        );
-
-        ui.add_space(16.0);
-        ui.label(theme::b("heatmap", 13.0).color(theme::GOLD));
-        let heat = summary.heatmap.clone();
+        let heat = self.heatmap.clone();
         if let Some(first) = heat.first() {
             if let Ok(first_date) = NaiveDate::parse_from_str(&first.date, "%Y-%m-%d") {
+                let today = chrono::Local::now().date_naive();
                 let first_col = first_date.weekday().num_days_from_monday() as usize;
-                let cells = first_col + heat.len();
-                let cols = cells.div_ceil(7);
-                let cell = 10.0;
+                let cols = (first_col + heat.len()).div_ceil(7);
                 let gap = 2.0;
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::Vec2::new(
-                        (cols as f32 * (cell + gap) - gap).min(ui.available_width()),
-                        7.0 * (cell + gap) - gap,
-                    ),
-                    egui::Sense::hover(),
+                let avail = ui.available_width();
+                let cell = (((avail - 36.0) / cols as f32) - gap).clamp(5.0, 12.0);
+                let height = 8.0 + 14.0 + 7.0 * (cell + gap) - gap + 8.0;
+                let (plate, _) =
+                    ui.allocate_exact_size(egui::Vec2::new(avail, height), egui::Sense::hover());
+                let painter = ui.painter();
+                painter.rect_filled(
+                    plate,
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(8, 5, 1, 110),
                 );
-                let max_min = heat.iter().map(|d| d.minutes).max().unwrap_or(0).max(1);
+                painter.line_segment(
+                    [plate.left_top(), plate.right_top()],
+                    egui::Stroke::new(1.0_f32, egui::Color32::BLACK),
+                );
+                painter.line_segment(
+                    [plate.left_top(), plate.left_bottom()],
+                    egui::Stroke::new(1.0_f32, egui::Color32::BLACK),
+                );
+                painter.line_segment(
+                    [plate.left_bottom(), plate.right_bottom()],
+                    egui::Stroke::new(1.0_f32, theme::BEVEL_HI),
+                );
+                painter.line_segment(
+                    [plate.right_top(), plate.right_bottom()],
+                    egui::Stroke::new(1.0_f32, theme::BEVEL_HI),
+                );
+                painter.line_segment(
+                    [
+                        plate.left_top() + egui::Vec2::new(1.0, 1.0),
+                        plate.right_top() + egui::Vec2::new(-1.0, 1.0),
+                    ],
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 90)),
+                );
+                let grid_width = cols as f32 * (cell + gap) - gap;
+                let grid_left = plate.left() + ((plate.width() - grid_width) / 2.0).max(36.0);
+                let grid_top = plate.top() + 8.0 + 14.0;
+                let mut last_label_x = f32::NEG_INFINITY;
+                for (i, day) in heat.iter().enumerate() {
+                    if let Ok(date) = NaiveDate::parse_from_str(&day.date, "%Y-%m-%d") {
+                        if date.day() == 1 || i == 0 {
+                            let col = (first_col + i) / 7;
+                            let x = grid_left + col as f32 * (cell + gap);
+                            if x >= last_label_x + 18.0 {
+                                painter.text(
+                                    egui::Pos2::new(x, plate.top() + 8.0),
+                                    egui::Align2::LEFT_TOP,
+                                    date.format("%b").to_string().to_lowercase(),
+                                    theme::italic_font(9.5),
+                                    theme::DIM,
+                                );
+                                last_label_x = x;
+                            }
+                        }
+                    }
+                }
+                for (row, label) in [(0usize, "mon"), (2, "wed"), (4, "fri")] {
+                    painter.text(
+                        egui::Pos2::new(
+                            plate.left() + 8.0,
+                            grid_top + row as f32 * (cell + gap) + cell / 2.0,
+                        ),
+                        egui::Align2::LEFT_CENTER,
+                        label,
+                        theme::italic_font(9.5),
+                        theme::DIM,
+                    );
+                }
+                let max_min = heat.iter().map(|d| d.minutes).max().unwrap_or(0).max(1) as f32;
+                let levels = [
+                    egui::Color32::from_rgb(0x4a, 0x34, 0x14),
+                    egui::Color32::from_rgb(0x7a, 0x56, 0x20),
+                    egui::Color32::from_rgb(0xa8, 0x78, 0x30),
+                    egui::Color32::from_rgb(0xd8, 0xa2, 0x48),
+                ];
                 for (i, day) in heat.iter().enumerate() {
                     let idx = first_col + i;
                     let col = idx / 7;
                     let row = idx % 7;
-                    let x = rect.left() + col as f32 * (cell + gap);
-                    let y = rect.top() + row as f32 * (cell + gap);
-                    let cell_rect =
+                    let x = grid_left + col as f32 * (cell + gap);
+                    let y = grid_top + row as f32 * (cell + gap);
+                    let rect =
                         egui::Rect::from_min_size(egui::Pos2::new(x, y), egui::Vec2::splat(cell));
-                    let alpha = if day.minutes == 0 {
-                        18
+                    let date = NaiveDate::parse_from_str(&day.date, "%Y-%m-%d").ok();
+                    let future = date.map(|d| d > today).unwrap_or(false);
+                    let is_today = date.map(|d| d == today).unwrap_or(false);
+                    if future {
+                        painter.rect_filled(
+                            rect,
+                            0.0,
+                            egui::Color32::from_rgba_unmultiplied(19, 11, 3, 80),
+                        );
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(
+                                1.0_f32,
+                                egui::Color32::from_rgba_unmultiplied(138, 98, 40, 110),
+                            ),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else if day.minutes == 0 {
+                        painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(0x13, 0x0b, 0x03));
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(1.0_f32, theme::LINE_SOFT),
+                            egui::StrokeKind::Inside,
+                        );
                     } else {
-                        (40.0 + 200.0 * day.minutes as f32 / max_min as f32) as u8
-                    };
-                    ui.painter().rect_filled(
-                        cell_rect,
-                        0.0,
-                        egui::Color32::from_rgba_unmultiplied(216, 162, 72, alpha),
-                    );
-                    let resp =
-                        ui.interact(cell_rect, ui.id().with(("heat", i)), egui::Sense::hover());
-                    resp.on_hover_text(format!("{} — {}", day.date, fmt_hm(day.minutes)));
+                        let level = ((day.minutes as f32 / max_min) * 4.0)
+                            .ceil()
+                            .clamp(1.0, 4.0) as usize;
+                        painter.rect_filled(rect, 0.0, levels[level - 1]);
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(
+                                1.0_f32,
+                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80),
+                            ),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if is_today {
+                        painter.rect_stroke(
+                            rect,
+                            0.0,
+                            egui::Stroke::new(1.0_f32, theme::BRIGHT),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    ui.interact(rect, ui.id().with(("heatmap", i)), egui::Sense::hover())
+                        .on_hover_text(format!("{} — {}", day.date, fmt_hm(day.minutes)));
                 }
             }
         }
-        ui.label(
-            theme::i(
-                format!(
-                    "{} → {}",
-                    heat.first().map(|d| d.date.as_str()).unwrap_or(""),
-                    heat.last().map(|d| d.date.as_str()).unwrap_or("")
-                ),
-                10.0,
-            )
-            .color(theme::DIM),
-        );
-
         ui.add_space(20.0);
         ui.label(theme::b("last 7 days by category", 13.0).color(theme::GOLD));
         if summary.daily_categories.iter().all(|d| d.total == 0) {
@@ -1372,6 +1480,62 @@ impl App {
                 ui.label(theme::t(fmt_hm(month.min), 13.0).color(theme::GOLD));
             });
         }
+
+        ui.add_space(22.0);
+        ui.label(theme::b("hourly", 13.0).color(theme::GOLD));
+        let hours = summary.hours.clone();
+        let max_hour = hours.iter().copied().max().unwrap_or(0).max(1) as f32;
+        let (chart_rect, _) = ui.allocate_exact_size(
+            egui::Vec2::new(ui.available_width(), 78.0),
+            egui::Sense::hover(),
+        );
+        let base_y = chart_rect.bottom() - 15.0;
+        let slot = chart_rect.width() / 24.0;
+        for h in 0..24 {
+            let v = *hours.get(h).unwrap_or(&0) as f32;
+            let bh = if v > 0.0 {
+                (v / max_hour) * (chart_rect.height() - 24.0)
+            } else {
+                0.0
+            };
+            let x = chart_rect.left() + h as f32 * slot + 1.0;
+            let bar = egui::Rect::from_min_max(
+                egui::Pos2::new(x, base_y - bh),
+                egui::Pos2::new(x + (slot - 2.0).max(1.0), base_y),
+            );
+            ui.painter().rect_filled(
+                bar,
+                0.0,
+                if v > 0.0 {
+                    theme::GOLD
+                } else {
+                    egui::Color32::from_rgb(0x2a, 0x1a, 0x08)
+                },
+            );
+            ui.interact(
+                bar.expand(1.0),
+                ui.id().with(("hour", h)),
+                egui::Sense::hover(),
+            )
+            .on_hover_text(format!("{h:02}:00 — {}m", hours[h]));
+        }
+        for h in [0usize, 6, 12, 18, 23] {
+            let x = chart_rect.left() + h as f32 * slot + 1.0;
+            ui.painter().text(
+                egui::Pos2::new(x, chart_rect.bottom() - 2.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!("{h:02}"),
+                theme::italic_font(9.0),
+                theme::DIM,
+            );
+        }
+        ui.painter().line_segment(
+            [
+                egui::Pos2::new(chart_rect.left(), base_y),
+                egui::Pos2::new(chart_rect.right(), base_y),
+            ],
+            egui::Stroke::new(1.0_f32, theme::LINE_SOFT),
+        );
 
         ui.add_space(26.0);
         ui.horizontal(|ui| {

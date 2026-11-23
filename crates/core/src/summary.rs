@@ -157,16 +157,6 @@ impl Db {
             });
         }
 
-        let heat_days = range_days.unwrap_or(90).clamp(7, 180);
-        let mut heatmap = Vec::new();
-        for i in (0..heat_days).rev() {
-            let date = today - Duration::days(i);
-            heatmap.push(crate::model::HeatmapDay {
-                date: date.format("%Y-%m-%d").to_string(),
-                minutes: by_day.get(&date).copied().unwrap_or(0),
-            });
-        }
-
         Ok(Summary {
             total_min,
             total_periods,
@@ -182,8 +172,61 @@ impl Db {
             weeks,
             months,
             hours: by_hour.to_vec(),
-            heatmap,
         })
+    }
+
+    pub fn first_period_date(&self) -> Result<Option<NaiveDate>> {
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT substr(started_at,1,10) FROM pomo_periods ORDER BY started_at LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(raw.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()))
+    }
+
+    pub fn heatmap_years(&self) -> Result<Vec<i32>> {
+        let today = Local::now().date_naive();
+        let first = self.first_period_date()?.unwrap_or(today);
+        let mut years: Vec<i32> = (first.year()..=today.year()).collect();
+        if years.is_empty() {
+            years.push(today.year());
+        }
+        Ok(years)
+    }
+
+    pub fn heatmap_range(
+        &self,
+        start: NaiveDate,
+        end: NaiveDate,
+    ) -> Result<Vec<crate::model::HeatmapDay>> {
+        let mut by_day: std::collections::BTreeMap<NaiveDate, i64> = Default::default();
+        let mut stmt = self.conn.prepare(
+            "SELECT substr(started_at,1,10) AS d, SUM(minutes) FROM pomo_periods              WHERE substr(started_at,1,10)>=? AND substr(started_at,1,10)<=? GROUP BY d",
+        )?;
+        let s = start.format("%Y-%m-%d").to_string();
+        let e = end.format("%Y-%m-%d").to_string();
+        let rows = stmt.query_map(params![s, e], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (day, min) = row?;
+            if let Ok(day) = NaiveDate::parse_from_str(&day, "%Y-%m-%d") {
+                by_day.insert(day, min);
+            }
+        }
+        let mut out = Vec::new();
+        let mut d = start;
+        while d <= end {
+            out.push(crate::model::HeatmapDay {
+                date: d.format("%Y-%m-%d").to_string(),
+                minutes: by_day.get(&d).copied().unwrap_or(0),
+            });
+            d += Duration::days(1);
+        }
+        Ok(out)
     }
 
     pub fn periods(&self, days: i64) -> Result<Vec<crate::model::PeriodRow>> {

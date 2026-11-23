@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use chrono::{Duration as ChronoDuration, Local};
+use chrono::{Duration as ChronoDuration, Local, NaiveDate};
 use serde_json::json;
 
 use crate::{Db, PomoAction};
@@ -363,11 +363,20 @@ fn summary_range_and_heatmap() {
         .unwrap();
     let all = db.summary().unwrap();
     assert_eq!(all.total_min, 113);
-    assert_eq!(all.heatmap.len(), 90);
     assert_eq!(all.hours[14], 113);
     let recent = db.summary_range(Some(7)).unwrap();
     assert_eq!(recent.total_min, 0);
-    assert_eq!(recent.heatmap.len(), 7);
+    let start = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    let end = NaiveDate::from_ymd_opt(2026, 12, 31).unwrap();
+    let heat = db.heatmap_range(start, end).unwrap();
+    assert_eq!(heat.len(), 365);
+    assert!(heat
+        .iter()
+        .any(|d| d.date == "2026-09-23" && d.minutes == 113));
+    assert_eq!(
+        db.first_period_date().unwrap(),
+        Some(NaiveDate::from_ymd_opt(2026, 9, 23).unwrap())
+    );
     drop(db);
     cleanup(&path);
 }

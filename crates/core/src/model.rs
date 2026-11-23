@@ -179,7 +179,6 @@ pub struct Summary {
     pub weeks: Vec<Bucket>,
     pub months: Vec<Bucket>,
     pub hours: Vec<i64>,
-    pub heatmap: Vec<HeatmapDay>,
 }
 
 #[derive(Clone, Debug, Default)]
