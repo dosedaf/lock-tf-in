@@ -133,6 +133,7 @@ pub struct App {
     pub last_window: (u32, u32),
     pub pending_window: (u32, u32),
     pub window_save_at: Option<Instant>,
+    pub window_started_at: Instant,
     pub drag_group: Option<i64>,
     pub drag_group_target: Option<i64>,
     pub drag_subject: Option<(i64, i64)>,
@@ -258,6 +259,7 @@ impl App {
             last_window: (saved_w, saved_h),
             pending_window: (saved_w, saved_h),
             window_save_at: None,
+            window_started_at: Instant::now(),
             drag_group: None,
             drag_group_target: None,
             drag_subject: None,
@@ -375,6 +377,7 @@ impl App {
             if self.quitting || QUIT_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
                 self.save_window_now(ctx);
                 let _ = std::fs::remove_file(crate::socket_path());
+                let _ = std::fs::remove_file(crate::pid_path());
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
@@ -598,6 +601,8 @@ impl App {
             } else if ctx.input(|i| i.key_pressed(egui::Key::Q)) {
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else if ctx.input(|i| i.modifiers.shift && i.key_pressed(egui::Key::R)) {
+                self.reset_window(ctx);
             } else if ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)) {
                 self.set_zoom(ctx, self.zoom + 0.1);
             } else if ctx.input(|i| i.key_pressed(egui::Key::Minus)) {
@@ -618,21 +623,79 @@ impl App {
         }
     }
 
-    pub fn native_window_size(&self, ctx: &egui::Context) -> (u32, u32) {
-        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
-            let size = rect.size();
-            return (
-                size.x.round().max(1.0) as u32,
-                size.y.round().max(1.0) as u32,
-            );
+    pub fn apply_window_size(&mut self, ctx: &egui::Context, w: f32, h: f32) {
+        if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
+            self.settings_msg = Some((
+                "width and height must be positive".into(),
+                false,
+                Instant::now(),
+            ));
+            return;
         }
-        self.last_window
+        let (mut w, mut h) = (w, h);
+        let mut clamped = false;
+        if let Some(mon) = ctx.input(|i| i.viewport().monitor_size) {
+            let max_w = (mon.x * 0.92).max(1.0);
+            let max_h = (mon.y * 0.88).max(1.0);
+            if w > max_w {
+                w = max_w;
+                clamped = true;
+            }
+            if h > max_h {
+                h = max_h;
+                clamped = true;
+            }
+        }
+        let wi = w.round().max(1.0) as u32;
+        let hi = h.round().max(1.0) as u32;
+        self.settings_w = wi.to_string();
+        self.settings_h = hi.to_string();
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::new(
+            w, h,
+        )));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.last_window = (wi, hi);
+        self.pending_window = (wi, hi);
+        self.window_save_at = None;
+        let _ = self.db.set_setting("ui_window_w", &wi.to_string());
+        let _ = self.db.set_setting("ui_window_h", &hi.to_string());
+        self.settings_msg = Some((
+            if clamped {
+                format!("clamped to screen · saved {wi} × {hi}")
+            } else {
+                format!("window size saved · {wi} × {hi}")
+            },
+            true,
+            Instant::now(),
+        ));
+    }
+
+
+    fn reset_window(&mut self, ctx: &egui::Context) {
+        self.apply_window_size(ctx, 960.0, 780.0);
+    }
+
+    pub fn native_window_size(&self, ctx: &egui::Context) -> (u32, u32) {
+        let size = ctx.screen_rect().size() * self.zoom;
+        (
+            size.x.round().max(1.0) as u32,
+            size.y.round().max(1.0) as u32,
+        )
     }
 
     fn track_window(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
+        if self.window_started_at.elapsed() < Duration::from_millis(1500) {
+            return;
+        }
         let size = self.native_window_size(ctx);
-        if size.0 == 0 || size.1 == 0 {
+        if size.0 == 0
+            || size.1 == 0
+            || size.0 > 5000
+            || size.1 > 4000
+        {
             return;
         }
         if size != self.pending_window {

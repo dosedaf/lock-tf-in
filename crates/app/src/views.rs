@@ -1099,7 +1099,7 @@ impl App {
     pub fn view_settings(&mut self, ui: &mut Ui) {
         if self.settings_needs_sync {
             let (w, h) = self.native_window_size(ui.ctx());
-            if w > 0 && h > 0 {
+            if w > 0 && h > 0 && w < 5000 && h < 4000 {
                 self.settings_w = w.to_string();
                 self.settings_h = h.to_string();
                 self.settings_zoom = format!("{:.0}", self.zoom * 100.0);
@@ -1127,27 +1127,13 @@ impl App {
             if theme::link(ui, "apply", 13.0, theme::RED).clicked() {
                 let w = self.settings_w.trim().parse::<f32>().unwrap_or(-1.0);
                 let h = self.settings_h.trim().parse::<f32>().unwrap_or(-1.0);
-                if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 {
-                    self.settings_msg = Some((
-                        "width and height must be positive".into(),
-                        false,
-                        std::time::Instant::now(),
-                    ));
-                } else {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                        egui::Vec2::new(w, h),
-                    ));
-                    let (wi, hi) = (w.round() as u32, h.round() as u32);
-                    self.last_window = (wi, hi);
-                    self.pending_window = (wi, hi);
-                    self.window_save_at = None;
-                    let _ = self.db.set_setting("ui_window_w", &wi.to_string());
-                    let _ = self.db.set_setting("ui_window_h", &hi.to_string());
-                    self.settings_msg = Some((
-                        "window size saved".into(),
-                        true,
-                        std::time::Instant::now(),
-                    ));
+                self.apply_window_size(ui.ctx(), w, h);
+            }
+            if theme::link(ui, "fit to screen", 12.0, theme::RED).clicked() {
+                if let Some(mon) = ui.ctx().input(|i| i.viewport().monitor_size) {
+                    self.settings_w = format!("{:.0}", mon.x * 0.9);
+                    self.settings_h = format!("{:.0}", mon.y * 0.85);
+                    self.apply_window_size(ui.ctx(), mon.x * 0.9, mon.y * 0.85);
                 }
             }
             if theme::link(ui, "use current", 12.0, theme::RED).clicked() {
@@ -1158,19 +1144,7 @@ impl App {
             if theme::link(ui, "reset", 12.0, theme::RED).clicked() {
                 self.settings_w = "960".into();
                 self.settings_h = "780".into();
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::new(
-                        960.0, 780.0,
-                    )));
-                self.last_window = (960, 780);
-                self.pending_window = (960, 780);
-                let _ = self.db.set_setting("ui_window_w", "960");
-                let _ = self.db.set_setting("ui_window_h", "780");
-                self.settings_msg = Some((
-                    "reset to 960 × 780".into(),
-                    true,
-                    std::time::Instant::now(),
-                ));
+                self.apply_window_size(ui.ctx(), 960.0, 780.0);
             }
         });
         let (cw, ch) = self.native_window_size(ui.ctx());

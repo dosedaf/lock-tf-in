@@ -26,16 +26,18 @@ fn resolve_db(explicit: Option<String>) -> PathBuf {
         .join("lockin/todo.db")
 }
 
-fn parse_args() -> (Option<String>, bool) {
+fn parse_args() -> (Option<String>, bool, bool) {
     let mut db = None;
     let mut quit_existing = false;
+    let mut reset_window = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--db" => db = args.next(),
             "--quit" => quit_existing = true,
+            "--reset-window" => reset_window = true,
             "--help" | "-h" => {
-                println!("lockin [--db PATH] [--quit]");
+                println!("lockin [--db PATH] [--quit] [--reset-window]");
                 std::process::exit(0);
             }
             other => {
@@ -45,7 +47,7 @@ fn parse_args() -> (Option<String>, bool) {
             }
         }
     }
-    (db, quit_existing)
+    (db, quit_existing, reset_window)
 }
 
 fn socket_path() -> PathBuf {
@@ -56,6 +58,10 @@ fn socket_path() -> PathBuf {
     }
     let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
     Path::new(&runtime).join("lockin-app.sock")
+}
+
+pub fn pid_path() -> PathBuf {
+    socket_path().with_extension("pid")
 }
 
 /// Try to hand off to an already running instance. Returns true if it did.
@@ -115,10 +121,28 @@ fn app_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
-    let (db_arg, quit_existing) = parse_args();
+    let (db_arg, quit_existing, reset_window) = parse_args();
     let db_path = resolve_db(db_arg);
 
-    if hand_off(quit_existing) {
+    if reset_window {
+        if let Ok(db) = lockin_core::Db::open(&db_path) {
+            let _ = db.set_setting("ui_window_w", "960");
+            let _ = db.set_setting("ui_window_h", "780");
+        }
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(socket_path()) {
+            let _ = stream.write_all(b"quit");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        if let Ok(pid) = std::fs::read_to_string(pid_path()) {
+            let pid = pid.trim();
+            if !pid.is_empty() && Path::new(&format!("/proc/{pid}")).exists() {
+                let _ = std::process::Command::new("kill").arg(pid).status();
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+        let _ = std::fs::remove_file(socket_path());
+        let _ = std::fs::remove_file(pid_path());
+    } else if hand_off(quit_existing) {
         return Ok(());
     }
 
@@ -143,6 +167,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
 
+    let _ = std::fs::write(pid_path(), std::process::id().to_string());
     let db_for_app = db_path.clone();
     eframe::run_native(
         "LOCK IN",
