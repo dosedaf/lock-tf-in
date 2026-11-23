@@ -437,7 +437,7 @@ impl App {
                         }
                     },
                 );
-                ui.add_space(8.0);
+                ui.add_space(3.0);
             });
 
         egui::CentralPanel::default()
@@ -454,7 +454,7 @@ impl App {
                             ui.add_space(pad);
                             ui.vertical(|ui| {
                                 ui.set_width(content_width);
-                                ui.add_space(14.0);
+                                ui.add_space(3.0);
                                 match self.view {
                                     View::Tasks => self.view_tasks(ui),
                                     View::Tracker => self.view_tracker(ui),
