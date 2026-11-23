@@ -146,7 +146,7 @@ impl App {
         let zoom: f32 = db
             .get_setting("ui_zoom")
             .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(1.4)
+            .unwrap_or(1.55)
             .clamp(0.9, 2.0);
         ctx.set_zoom_factor(zoom);
         let group_expanded: HashSet<i64> = db
@@ -562,7 +562,7 @@ impl App {
             } else if ctx.input(|i| i.key_pressed(egui::Key::Minus)) {
                 self.set_zoom(ctx, self.zoom - 0.1);
             } else if ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
-                self.set_zoom(ctx, 1.4);
+                self.set_zoom(ctx, 1.55);
             }
         }
         if !typing && ctx.input(|i| i.key_pressed(egui::Key::Space)) {

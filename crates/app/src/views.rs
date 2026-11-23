@@ -21,6 +21,17 @@ pub fn fmt_clock(ms: i64) -> String {
     format!("{}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
 }
 
+#[derive(Default)]
+pub struct SettingsActions {
+    close: bool,
+    set_category: Option<Option<i64>>,
+    set_subject: Option<Option<i64>>,
+    add_category: bool,
+    rename_category: bool,
+    delete_category: bool,
+    save_cfg: bool,
+}
+
 impl App {
     pub fn view_timer(&mut self, ui: &mut Ui) {
         let remaining = self.remaining_ms();
@@ -109,21 +120,10 @@ impl App {
     }
 
     pub fn settings_popup(&mut self, ctx: &egui::Context) {
-        let mut close = false;
-        let mut set_category: Option<Option<i64>> = None;
-        let mut set_subject: Option<Option<i64>> = None;
-        let mut add_category = false;
-        let mut rename_category = false;
-        let mut delete_category = false;
-        let mut save_cfg = false;
-        let cats: Vec<(i64, String)> = self
-            .categories
-            .iter()
-            .map(|c| (c.id, c.name.clone()))
-            .collect();
-        let subjects = self.subjects.clone();
-        let cur_cat = self.pomo.category.as_ref().map(|c| c.id);
-        let cur_subj = self.pomo.subject.as_ref().map(|s| s.id);
+        let mut act = SettingsActions::default();
+        let screen_w = ctx.screen_rect().width();
+        let wide = screen_w >= 560.0;
+        let width = (screen_w - 64.0).clamp(300.0, 540.0);
 
         egui::Area::new(egui::Id::new("settings-popup"))
             .order(egui::Order::Foreground)
@@ -133,137 +133,44 @@ impl App {
                 theme::textured_panel(
                     ui,
                     self.ceramic.id(),
-                    Some(540.0),
+                    Some(width),
                     egui::Margin::symmetric(16, 12),
                     |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(theme::b("settings", 13.0).color(theme::BRIGHT));
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if popup_close(ui) {
-                                close = true;
-                            }
-                        });
-                    });
-                    ui.add_space(10.0);
-                    ui.columns(2, |cols| {
-                        let left = &mut cols[0];
-                        left.label(theme::b("timer", 13.0).color(theme::GOLD));
-                        left.horizontal(|ui| {
-                            ui.label(theme::i("focus", 12.0).color(theme::MUTED));
-                            ui.add_sized(
-                                [54.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.cfg_focus)
-                                    .font(theme::regular_font(13.0)),
-                            );
-                            ui.label(theme::i("break", 12.0).color(theme::MUTED));
-                            ui.add_sized(
-                                [54.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.cfg_break)
-                                    .font(theme::regular_font(13.0)),
-                            );
-                        });
-                        left.add_space(4.0);
-                        left.checkbox(&mut self.cfg_auto, "auto-start next phase");
-                        left.add_space(4.0);
-                        left.horizontal(|ui| {
-                            if theme::link(ui, "save", 13.0, theme::RED).clicked() {
-                                save_cfg = true;
-                            }
-                            if let Some((msg, ok, at)) = &self.cfg_msg {
-                                if at.elapsed().as_secs() < 3 {
-                                    ui.label(theme::tc(
-                                        msg,
-                                        12.0,
-                                        if *ok { theme::MUTED } else { theme::RED_HOT },
-                                    ));
-                                }
-                            }
-                        });
-
-                        let right = &mut cols[1];
-                        right.label(theme::b("context", 13.0).color(theme::GOLD));
-                        right.label(theme::i("category", 12.0).color(theme::MUTED));
-                        let selected = cats
-                            .iter()
-                            .find(|(id, _)| Some(*id) == cur_cat)
-                            .map(|(_, name)| name.clone())
-                            .unwrap_or_else(|| "Unallocated".into());
-                        egui::ComboBox::from_id_salt("cat-select")
-                            .width(190.0)
-                            .selected_text(selected)
-                            .show_ui(right, |ui| {
-                                if ui
-                                    .selectable_label(cur_cat.is_none(), "Unallocated")
-                                    .clicked()
-                                {
-                                    set_category = Some(None);
-                                }
-                                for (id, name) in &cats {
-                                    if ui.selectable_label(Some(*id) == cur_cat, name).clicked() {
-                                        set_category = Some(Some(*id));
-                                    }
+                        ui.horizontal(|ui| {
+                            ui.label(theme::b("settings", 13.0).color(theme::BRIGHT));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if popup_close(ui) {
+                                    act.close = true;
                                 }
                             });
-                        right.horizontal(|ui| {
-                            ui.add_sized(
-                                [130.0, 24.0],
-                                egui::TextEdit::singleline(&mut self.category_new)
-                                    .hint_text("new category...")
-                                    .font(theme::regular_font(13.0)),
-                            );
-                            if theme::link(ui, "+", 13.0, theme::RED).clicked() {
-                                add_category = true;
-                            }
-                            if theme::link(ui, "rename", 12.0, theme::RED).clicked() {
-                                rename_category = true;
-                            }
-                            if theme::link(ui, "delete", 12.0, theme::RED).clicked() {
-                                delete_category = true;
-                            }
                         });
-                        right.add_space(6.0);
-                        right.label(theme::i("subject", 12.0).color(theme::MUTED));
-                        let selected = self
-                            .pomo
-                            .subject
-                            .as_ref()
-                            .map(|s| s.name.clone())
-                            .unwrap_or_else(|| "none".into());
-                        egui::ComboBox::from_id_salt("subj-select")
-                            .width(220.0)
-                            .selected_text(selected)
-                            .show_ui(right, |ui| {
-                                if ui.selectable_label(cur_subj.is_none(), "none").clicked() {
-                                    set_subject = Some(None);
-                                }
-                                for (id, name, group) in &subjects {
-                                    if ui
-                                        .selectable_label(
-                                            Some(*id) == cur_subj,
-                                            format!("{group} · {name}"),
-                                        )
-                                        .clicked()
-                                    {
-                                        set_subject = Some(Some(*id));
-                                    }
-                                }
+                        ui.add_space(10.0);
+                        if wide {
+                            ui.columns(2, |cols| {
+                                self.settings_timer_section(&mut cols[0], &mut act);
+                                self.settings_context_section(&mut cols[1], &mut act);
                             });
-                    });
-                });
+                        } else {
+                            self.settings_timer_section(ui, &mut act);
+                            ui.add_space(14.0);
+                            self.settings_context_section(ui, &mut act);
+                        }
+                    },
+                );
             });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            close = true;
+            act.close = true;
         }
-        if let Some(cat) = set_category {
+        if let Some(cat) = act.set_category {
             let _ = self.db.pomo_action(PomoAction::SetCategory(cat));
             self.reload_timer();
         }
-        if let Some(sub) = set_subject {
+        if let Some(sub) = act.set_subject {
             let _ = self.db.pomo_action(PomoAction::SetSubject(sub));
             self.reload_timer();
         }
-        if add_category {
+        if act.add_category {
             let name = self.category_new.trim().to_string();
             if !name.is_empty() {
                 if let Ok(id) = self.db.add_category(&name) {
@@ -274,7 +181,7 @@ impl App {
                 }
             }
         }
-        if save_cfg {
+        if act.save_cfg {
             let focus: i64 = self.cfg_focus.trim().parse().unwrap_or(-1);
             let brk: i64 = self.cfg_break.trim().parse().unwrap_or(-1);
             if !(1..=600).contains(&focus) || !(1..=600).contains(&brk) {
@@ -293,12 +200,12 @@ impl App {
                 self.cfg_msg = Some(("saved ✓".into(), true, std::time::Instant::now()));
             }
         }
-        if rename_category {
+        if act.rename_category {
             if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
                 self.open_prompt(DialogKind::RenameCategory(id), "rename category", "name", &name);
             }
         }
-        if delete_category {
+        if act.delete_category {
             if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
                 let label = format!("delete \"{name}\"? its focus periods become Unallocated.");
                 self.open_prompt(
@@ -309,9 +216,115 @@ impl App {
                 );
             }
         }
-        if close {
+        if act.close {
             self.settings_open = false;
         }
+    }
+
+    fn settings_timer_section(&mut self, ui: &mut Ui, act: &mut SettingsActions) {
+        ui.label(theme::b("timer", 13.0).color(theme::GOLD));
+        ui.horizontal(|ui| {
+            ui.label(theme::i("focus", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [54.0, 24.0],
+                egui::TextEdit::singleline(&mut self.cfg_focus).font(theme::regular_font(13.0)),
+            );
+            ui.label(theme::i("break", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [54.0, 24.0],
+                egui::TextEdit::singleline(&mut self.cfg_break).font(theme::regular_font(13.0)),
+            );
+        });
+        ui.add_space(4.0);
+        ui.checkbox(&mut self.cfg_auto, "auto-start next phase");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if theme::link(ui, "save", 13.0, theme::RED).clicked() {
+                act.save_cfg = true;
+            }
+            if let Some((msg, ok, at)) = &self.cfg_msg {
+                if at.elapsed().as_secs() < 3 {
+                    ui.label(theme::tc(
+                        msg,
+                        12.0,
+                        if *ok { theme::MUTED } else { theme::RED_HOT },
+                    ));
+                }
+            }
+        });
+    }
+
+    fn settings_context_section(&mut self, ui: &mut Ui, act: &mut SettingsActions) {
+        let cats: Vec<(i64, String)> = self
+            .categories
+            .iter()
+            .map(|c| (c.id, c.name.clone()))
+            .collect();
+        let subjects = self.subjects.clone();
+        let cur_cat = self.pomo.category.as_ref().map(|c| c.id);
+        let cur_subj = self.pomo.subject.as_ref().map(|s| s.id);
+
+        ui.label(theme::b("context", 13.0).color(theme::GOLD));
+        ui.label(theme::i("category", 12.0).color(theme::MUTED));
+        let selected = cats
+            .iter()
+            .find(|(id, _)| Some(*id) == cur_cat)
+            .map(|(_, name)| name.clone())
+            .unwrap_or_else(|| "Unallocated".into());
+        egui::ComboBox::from_id_salt("cat-select")
+            .width(190.0)
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(cur_cat.is_none(), "Unallocated").clicked() {
+                    act.set_category = Some(None);
+                }
+                for (id, name) in &cats {
+                    if ui.selectable_label(Some(*id) == cur_cat, name).clicked() {
+                        act.set_category = Some(Some(*id));
+                    }
+                }
+            });
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                [130.0, 24.0],
+                egui::TextEdit::singleline(&mut self.category_new)
+                    .hint_text("new category...")
+                    .font(theme::regular_font(13.0)),
+            );
+            if theme::link(ui, "+", 13.0, theme::RED).clicked() {
+                act.add_category = true;
+            }
+            if theme::link(ui, "rename", 12.0, theme::RED).clicked() {
+                act.rename_category = true;
+            }
+            if theme::link(ui, "delete", 12.0, theme::RED).clicked() {
+                act.delete_category = true;
+            }
+        });
+        ui.add_space(6.0);
+        ui.label(theme::i("subject", 12.0).color(theme::MUTED));
+        let selected = self
+            .pomo
+            .subject
+            .as_ref()
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "none".into());
+        egui::ComboBox::from_id_salt("subj-select")
+            .width(220.0)
+            .selected_text(selected)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(cur_subj.is_none(), "none").clicked() {
+                    act.set_subject = Some(None);
+                }
+                for (id, name, group) in &subjects {
+                    if ui
+                        .selectable_label(Some(*id) == cur_subj, format!("{group} · {name}"))
+                        .clicked()
+                    {
+                        act.set_subject = Some(Some(*id));
+                    }
+                }
+            });
     }
 
     pub fn view_tracker(&mut self, ui: &mut Ui) {
@@ -1119,6 +1132,7 @@ impl App {
     #[allow(dead_code)]
     fn _layout(_: Layout, _: Align) {}
 }
+
 
 pub fn fmt_date(iso: &str) -> String {
     if iso.len() < 10 {
