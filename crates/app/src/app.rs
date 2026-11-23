@@ -133,6 +133,7 @@ pub struct App {
     pub cat_unalloc_to: Option<i64>,
 
     pub summary: Option<lockin_core::Summary>,
+    pub summary_range: Option<i64>,
     pub months: Vec<String>,
     pub periods: Vec<lockin_core::PeriodRow>,
     pub periods_loaded: bool,
@@ -291,6 +292,7 @@ impl App {
             cat_merge_to: None,
             cat_unalloc_to: None,
             summary: None,
+            summary_range: Some(30),
             months,
             periods: Vec::new(),
             periods_loaded: false,
@@ -448,7 +450,7 @@ impl App {
     }
 
     pub fn reload_summary(&mut self) {
-        self.summary = self.db.summary().ok();
+        self.summary = self.db.summary_range(self.summary_range).ok();
         self.months = self.db.months().unwrap_or_default();
     }
 

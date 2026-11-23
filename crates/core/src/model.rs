@@ -156,6 +156,12 @@ pub struct DailyCategory {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct HeatmapDay {
+    pub date: String,
+    pub minutes: i64,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct Bucket {
     pub label: String,
     pub min: i64,
@@ -173,6 +179,7 @@ pub struct Summary {
     pub weeks: Vec<Bucket>,
     pub months: Vec<Bucket>,
     pub hours: Vec<i64>,
+    pub heatmap: Vec<HeatmapDay>,
 }
 
 #[derive(Clone, Debug, Default)]

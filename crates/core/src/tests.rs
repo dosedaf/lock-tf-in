@@ -355,3 +355,19 @@ fn category_merge_and_unallocated_cleanup() {
     drop(db);
     cleanup(&path);
 }
+
+#[test]
+fn summary_range_and_heatmap() {
+    let (db, path) = temp_db("summary-range");
+    db.import_pomofocus("23-Sep-2026\n14:39 ~ 16:56\nclickhouse\n113\n", false)
+        .unwrap();
+    let all = db.summary().unwrap();
+    assert_eq!(all.total_min, 113);
+    assert_eq!(all.heatmap.len(), 90);
+    assert_eq!(all.hours[14], 113);
+    let recent = db.summary_range(Some(7)).unwrap();
+    assert_eq!(recent.total_min, 0);
+    assert_eq!(recent.heatmap.len(), 7);
+    drop(db);
+    cleanup(&path);
+}

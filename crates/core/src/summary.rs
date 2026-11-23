@@ -3,11 +3,17 @@ use chrono::{Datelike, Duration, Local, NaiveDate};
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 
-use crate::db::{today_str, Db};
+use crate::db::Db;
 use crate::model::{Bucket, DailyCategory, Summary};
 
 impl Db {
     pub fn summary(&self) -> Result<Summary> {
+        self.summary_range(None)
+    }
+
+    pub fn summary_range(&self, range_days: Option<i64>) -> Result<Summary> {
+        let today = Local::now().date_naive();
+        let cutoff = range_days.map(|d| today - Duration::days(d.max(1) - 1));
         let mut rows = Vec::new();
         {
             let mut stmt = self
@@ -18,32 +24,41 @@ impl Db {
                 rows.push(row?);
             }
         }
-        let total_min: i64 = rows.iter().map(|(m, _)| *m).sum();
-        let mut by_day: std::collections::BTreeMap<String, i64> = Default::default();
+
+        let mut all_by_day: std::collections::BTreeMap<NaiveDate, i64> = Default::default();
+        let mut by_day: std::collections::BTreeMap<NaiveDate, i64> = Default::default();
         let mut by_hour = [0i64; 24];
+        let mut total_min = 0i64;
+        let mut total_periods = 0i64;
         for (minutes, started) in &rows {
-            if started.len() >= 13 {
-                by_day
-                    .entry(started[..10].to_string())
-                    .and_modify(|v| *v += minutes)
-                    .or_insert(*minutes);
-                if let Ok(h) = started[11..13].parse::<usize>() {
-                    if h < 24 {
-                        by_hour[h] += minutes;
+            if started.len() < 10 {
+                continue;
+            }
+            let Ok(day) = NaiveDate::parse_from_str(&started[..10], "%Y-%m-%d") else {
+                continue;
+            };
+            *all_by_day.entry(day).or_insert(0) += minutes;
+            if cutoff.map(|c| day >= c).unwrap_or(true) {
+                total_min += minutes;
+                total_periods += 1;
+                *by_day.entry(day).or_insert(0) += minutes;
+                if started.len() >= 13 {
+                    if let Ok(h) = started[11..13].parse::<usize>() {
+                        if h < 24 {
+                            by_hour[h] += minutes;
+                        }
                     }
                 }
             }
         }
 
-        let dates: Vec<NaiveDate> = by_day
-            .keys()
-            .filter_map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-            .collect();
+        let dates: Vec<NaiveDate> = by_day.keys().copied().collect();
+        let all_dates: Vec<NaiveDate> = all_by_day.keys().copied().collect();
 
         let mut best_streak = 0;
         let mut run = 0;
         let mut prev: Option<NaiveDate> = None;
-        for d in &dates {
+        for d in &all_dates {
             run = match prev {
                 Some(p) if (*d - p).num_days() == 1 => run + 1,
                 _ => 1,
@@ -52,14 +67,13 @@ impl Db {
             prev = Some(*d);
         }
 
-        let today = Local::now().date_naive();
         let mut cur_streak = 0;
-        let mut d = if by_day.contains_key(&today_str()) {
+        let mut d = if all_by_day.contains_key(&today) {
             today
         } else {
             today - Duration::days(1)
         };
-        while by_day.contains_key(&d.format("%Y-%m-%d").to_string()) {
+        while all_by_day.contains_key(&d) {
             cur_streak += 1;
             d -= Duration::days(1);
         }
@@ -69,14 +83,11 @@ impl Db {
         for i in (0..=7).rev() {
             let ws = monday - Duration::weeks(i as i64);
             let we = ws + Duration::days(7);
-            let mut min = 0;
-            for (day, v) in &by_day {
-                if let Ok(day) = NaiveDate::parse_from_str(day, "%Y-%m-%d") {
-                    if day >= ws && day < we {
-                        min += v;
-                    }
-                }
-            }
+            let min: i64 = by_day
+                .iter()
+                .filter(|(day, _)| **day >= ws && **day < we)
+                .map(|(_, v)| *v)
+                .sum();
             weeks.push(Bucket {
                 label: ws.format("%b %d").to_string(),
                 min,
@@ -87,10 +98,9 @@ impl Db {
         let mut months = Vec::new();
         for i in (0..=11).rev() {
             let (y, mo) = month_back(mstart.year(), mstart.month(), i);
-            let key = format!("{y:04}-{mo:02}");
             let min: i64 = by_day
                 .iter()
-                .filter(|(k, _)| k.starts_with(&key))
+                .filter(|(day, _)| day.year() == y && day.month() == mo)
                 .map(|(_, v)| *v)
                 .sum();
             if min > 0 {
@@ -147,9 +157,19 @@ impl Db {
             });
         }
 
+        let heat_days = range_days.unwrap_or(90).clamp(7, 180);
+        let mut heatmap = Vec::new();
+        for i in (0..heat_days).rev() {
+            let date = today - Duration::days(i);
+            heatmap.push(crate::model::HeatmapDay {
+                date: date.format("%Y-%m-%d").to_string(),
+                minutes: by_day.get(&date).copied().unwrap_or(0),
+            });
+        }
+
         Ok(Summary {
             total_min,
-            total_periods: rows.len() as i64,
+            total_periods,
             days_accessed: dates.len() as i64,
             streak_current: cur_streak,
             streak_best: best_streak,
@@ -162,6 +182,7 @@ impl Db {
             weeks,
             months,
             hours: by_hour.to_vec(),
+            heatmap,
         })
     }
 

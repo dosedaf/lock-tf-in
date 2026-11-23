@@ -1,6 +1,6 @@
 use crate::app::{App, DialogKind};
 use crate::theme;
-use chrono::{Duration as ChronoDuration, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, Duration as ChronoDuration, NaiveDate, NaiveDateTime, NaiveTime};
 use eframe::egui::{self, Align, Layout, Ui};
 use lockin_core::PomoAction;
 
@@ -1176,7 +1176,24 @@ impl App {
         };
         let mut open_card: Option<lockin_core::CardKind> = None;
 
-        Self::section_title(ui, "summary", "");
+        ui.horizontal(|ui| {
+            ui.label(theme::b("summary", 17.0).color(theme::GOLD));
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                for (label, days) in [
+                    ("all", None),
+                    ("90d", Some(90i64)),
+                    ("30d", Some(30i64)),
+                    ("7d", Some(7i64)),
+                ] {
+                    let current = self.summary_range == days;
+                    let color = if current { theme::BRIGHT } else { theme::RED };
+                    if theme::link(ui, label, 12.0, color).clicked() && !current {
+                        self.summary_range = days;
+                        self.reload_summary();
+                    }
+                }
+            });
+        });
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.label(theme::b(fmt_hm(summary.total_min), 13.0).color(theme::BRIGHT));
@@ -1188,6 +1205,116 @@ impl App {
             ui.label(theme::b(format!("{}d", summary.streak_current), 13.0).color(theme::BRIGHT));
             ui.label(theme::i("current streak", 11.0).color(theme::MUTED));
         });
+
+        ui.add_space(18.0);
+        ui.label(theme::b("hourly", 13.0).color(theme::GOLD));
+        let hours = summary.hours.clone();
+        let max_hour = hours.iter().copied().max().unwrap_or(0).max(1) as f32;
+        let (chart_rect, _) = ui.allocate_exact_size(
+            egui::Vec2::new(ui.available_width(), 78.0),
+            egui::Sense::hover(),
+        );
+        let base_y = chart_rect.bottom() - 15.0;
+        let slot = chart_rect.width() / 24.0;
+        for h in 0..24 {
+            let v = *hours.get(h).unwrap_or(&0) as f32;
+            let bh = if v > 0.0 {
+                (v / max_hour) * (chart_rect.height() - 24.0)
+            } else {
+                0.0
+            };
+            let x = chart_rect.left() + h as f32 * slot + 1.0;
+            let bar = egui::Rect::from_min_max(
+                egui::Pos2::new(x, base_y - bh),
+                egui::Pos2::new(x + (slot - 2.0).max(1.0), base_y),
+            );
+            ui.painter().rect_filled(
+                bar,
+                0.0,
+                if v > 0.0 {
+                    theme::GOLD
+                } else {
+                    egui::Color32::from_rgb(0x2a, 0x1a, 0x08)
+                },
+            );
+            let resp = ui.interact(
+                bar.expand(1.0),
+                ui.id().with(("hour", h)),
+                egui::Sense::hover(),
+            );
+            resp.on_hover_text(format!("{h:02}:00 — {}m", hours[h]));
+        }
+        for h in [0usize, 6, 12, 18, 23] {
+            let x = chart_rect.left() + h as f32 * slot + 1.0;
+            ui.painter().text(
+                egui::Pos2::new(x, chart_rect.bottom() - 2.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!("{h:02}"),
+                theme::italic_font(9.0),
+                theme::DIM,
+            );
+        }
+        ui.painter().line_segment(
+            [
+                egui::Pos2::new(chart_rect.left(), base_y),
+                egui::Pos2::new(chart_rect.right(), base_y),
+            ],
+            egui::Stroke::new(1.0_f32, theme::LINE_SOFT),
+        );
+
+        ui.add_space(16.0);
+        ui.label(theme::b("heatmap", 13.0).color(theme::GOLD));
+        let heat = summary.heatmap.clone();
+        if let Some(first) = heat.first() {
+            if let Ok(first_date) = NaiveDate::parse_from_str(&first.date, "%Y-%m-%d") {
+                let first_col = first_date.weekday().num_days_from_monday() as usize;
+                let cells = first_col + heat.len();
+                let cols = cells.div_ceil(7);
+                let cell = 10.0;
+                let gap = 2.0;
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::Vec2::new(
+                        (cols as f32 * (cell + gap) - gap).min(ui.available_width()),
+                        7.0 * (cell + gap) - gap,
+                    ),
+                    egui::Sense::hover(),
+                );
+                let max_min = heat.iter().map(|d| d.minutes).max().unwrap_or(0).max(1);
+                for (i, day) in heat.iter().enumerate() {
+                    let idx = first_col + i;
+                    let col = idx / 7;
+                    let row = idx % 7;
+                    let x = rect.left() + col as f32 * (cell + gap);
+                    let y = rect.top() + row as f32 * (cell + gap);
+                    let cell_rect =
+                        egui::Rect::from_min_size(egui::Pos2::new(x, y), egui::Vec2::splat(cell));
+                    let alpha = if day.minutes == 0 {
+                        18
+                    } else {
+                        (40.0 + 200.0 * day.minutes as f32 / max_min as f32) as u8
+                    };
+                    ui.painter().rect_filled(
+                        cell_rect,
+                        0.0,
+                        egui::Color32::from_rgba_unmultiplied(216, 162, 72, alpha),
+                    );
+                    let resp =
+                        ui.interact(cell_rect, ui.id().with(("heat", i)), egui::Sense::hover());
+                    resp.on_hover_text(format!("{} — {}", day.date, fmt_hm(day.minutes)));
+                }
+            }
+        }
+        ui.label(
+            theme::i(
+                format!(
+                    "{} → {}",
+                    heat.first().map(|d| d.date.as_str()).unwrap_or(""),
+                    heat.last().map(|d| d.date.as_str()).unwrap_or("")
+                ),
+                10.0,
+            )
+            .color(theme::DIM),
+        );
 
         ui.add_space(20.0);
         ui.label(theme::b("last 7 days by category", 13.0).color(theme::GOLD));
