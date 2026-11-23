@@ -98,7 +98,7 @@ pub struct App {
     pub import_msg: String,
 
     pub tracker: Option<lockin_core::TrackerPayload>,
-    pub group_collapsed: HashSet<i64>,
+    pub group_expanded: HashSet<i64>,
     pub hold_collapsed: bool,
     pub done_collapsed_trk: bool,
     pub drop_collapsed: bool,
@@ -115,7 +115,6 @@ pub struct App {
     pub trk_notes: String,
 
     pub dialog: Option<Dialog>,
-    pub hl_phrase: String,
     pub hidden: bool,
     pub quitting: bool,
     pub ceramic: TextureHandle,
@@ -141,36 +140,15 @@ impl App {
         let categories = db.categories().unwrap_or_default();
         let subjects = load_subjects(&db);
 
-        let phrases = [
-            "resonance cascade",
-            "black mesa",
-            "lambda complex",
-            "xen borderworld",
-            "headcrab containment",
-            "crowbar certified",
-            "anomalous materials",
-            "unforeseen consequences",
-            "hazard course",
-            "surface tension",
-            "blast pit",
-            "on a rail",
-            "gordon freeman",
-            "g-man sighted",
-            "hev mark iv",
-            "sector c",
-            "test chamber",
-            "bounce path",
-            "station lambda",
-            "vortigaunt approved",
-            "nihilanth rising",
-        ];
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos() as usize)
-            .unwrap_or(0);
-
         let month = chrono::Local::now().format("%Y-%m").to_string();
         let months = db.months().unwrap_or_default();
+        let group_expanded: HashSet<i64> = db
+            .get_setting("tracker_expanded_groups")
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let hold_collapsed = db.get_setting_or("tracker_hold_collapsed", "1") == "1";
+        let done_collapsed_trk = db.get_setting_or("tracker_done_collapsed", "1") == "1";
+        let drop_collapsed = db.get_setting_or("tracker_drop_collapsed", "1") == "1";
         let initial_view = match std::env::var("LOCKIN_VIEW").unwrap_or_default().as_str() {
             "tracker" => View::Tracker,
             "timer" => View::Timer,
@@ -216,10 +194,10 @@ impl App {
             import_text: String::new(),
             import_msg: String::new(),
             tracker: None,
-            group_collapsed: HashSet::new(),
-            hold_collapsed: true,
-            done_collapsed_trk: true,
-            drop_collapsed: true,
+            group_expanded,
+            hold_collapsed,
+            done_collapsed_trk,
+            drop_collapsed,
             tracker_editor: None,
             tracker_menu: None,
             task_menu: None,
@@ -232,7 +210,6 @@ impl App {
             trk_url: String::new(),
             trk_notes: String::new(),
             dialog: None,
-            hl_phrase: phrases[seed % phrases.len()].to_string(),
             hidden: false,
             quitting: false,
             ceramic,
@@ -285,6 +262,24 @@ impl App {
     pub fn reload_categories(&mut self) {
         self.categories = self.db.categories().unwrap_or_default();
         self.subjects = load_subjects(&self.db);
+    }
+
+    pub fn save_tracker_collapse(&self) {
+        if let Ok(json) = serde_json::to_string(&self.group_expanded) {
+            let _ = self.db.set_setting("tracker_expanded_groups", &json);
+        }
+        let _ = self.db.set_setting(
+            "tracker_hold_collapsed",
+            if self.hold_collapsed { "1" } else { "0" },
+        );
+        let _ = self.db.set_setting(
+            "tracker_done_collapsed",
+            if self.done_collapsed_trk { "1" } else { "0" },
+        );
+        let _ = self.db.set_setting(
+            "tracker_drop_collapsed",
+            if self.drop_collapsed { "1" } else { "0" },
+        );
     }
 
     pub fn reload_tracker(&mut self) {
@@ -361,23 +356,97 @@ impl App {
         self.update_title(ctx);
         self.paint_background(ctx);
 
+        egui::TopBottomPanel::top("chrome")
+            .frame(egui::Frame::none())
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6.0, 0.0);
+                let full = ui.available_width();
+                let bar_rect = egui::Rect::from_min_size(
+                    ui.cursor().min,
+                    Vec2::new(full, 36.0),
+                );
+                ui.painter().rect_filled(
+                    bar_rect,
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 64),
+                );
+                let drag = ui.interact(
+                    bar_rect,
+                    ui.id().with("window-drag"),
+                    Sense::click_and_drag(),
+                );
+                if drag.drag_started() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+                if drag.double_clicked() {
+                    let maxed = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Maximized(!maxed));
+                }
+                ui.allocate_ui_with_layout(
+                    Vec2::new(full, 36.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.add_space(24.0);
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        ui.label(theme::b("lock tf in", 16.0).color(theme::GOLD));
+                        ui.label(
+                            theme::i("est. black mesa research facility.", 9.0)
+                                .color(theme::MUTED),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            self.window_controls(ui);
+                            ui.add_space(18.0);
+                        });
+                    },
+                );
+                let screen = ui.ctx().screen_rect();
+                let line_y = ui.cursor().top();
+                ui.painter().line_segment(
+                    [
+                        egui::Pos2::new(screen.left(), line_y),
+                        egui::Pos2::new(screen.right(), line_y),
+                    ],
+                    Stroke::new(1.0_f32, theme::BEVEL_HI),
+                );
+                ui.add_space(1.0);
+                ui.allocate_ui_with_layout(
+                    Vec2::new(full, 34.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| {
+                        ui.add_space(24.0);
+                        ui.spacing_mut().item_spacing.x = 18.0;
+                        for (view, label) in [
+                            (View::Tasks, "tasks"),
+                            (View::Tracker, "tracker"),
+                            (View::Timer, "timer"),
+                            (View::Summary, "summary"),
+                            (View::Log, "log"),
+                        ] {
+                            if theme::nav_link(ui, label, self.view == view).clicked() {
+                                self.set_view(view);
+                            }
+                        }
+                    },
+                );
+                ui.add_space(8.0);
+            });
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 4.0);
-                let full_width = ui.available_width();
+                let full = ui.available_width();
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let pad = (full_width * 0.15).round();
-                        let content_width = (full_width - pad * 2.0).max(240.0);
+                        let pad = 24.0;
+                        let content_width = (full - pad * 2.0).max(240.0);
                         ui.horizontal(|ui| {
                             ui.add_space(pad);
                             ui.vertical(|ui| {
                                 ui.set_width(content_width);
-                                self.masthead(ui);
-                                self.navigation(ui);
-                                ui.add_space(33.0);
+                                ui.add_space(14.0);
                                 match self.view {
                                     View::Tasks => self.view_tasks(ui),
                                     View::Tracker => self.view_tracker(ui),
@@ -529,60 +598,6 @@ impl App {
     }
 
     // ---------------------------------------------------------------- chrome
-
-    fn masthead(&mut self, ui: &mut Ui) {
-        let drag_rect = egui::Rect::from_min_size(
-            ui.cursor().min,
-            Vec2::new(ui.available_width(), 54.0),
-        );
-        let drag = ui.interact(
-            drag_rect,
-            ui.id().with("window-drag"),
-            Sense::click_and_drag(),
-        );
-        if drag.drag_started() {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        }
-        if drag.double_clicked() {
-            let maxed = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maxed));
-        }
-        ui.add_space(20.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 12.0;
-            ui.label(
-                theme::b("lock tf in", 22.0).color(theme::GOLD),
-            );
-            ui.add_space(1.0);
-            ui.label(theme::i("est. black mesa research facility.", 10.0).color(theme::MUTED));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                self.window_controls(ui);
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.with_layout(Layout::top_down(Align::Max), |ui| {
-                        ui.label(theme::tc("v1.0 · build 1998", 10.0, theme::MUTED));
-                        ui.label(theme::tc(&self.hl_phrase, 10.0, theme::MUTED));
-                    });
-                });
-            });
-        });
-        ui.add_space(20.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 14.0;
-            for (view, label) in [
-                (View::Tasks, "tasks"),
-                (View::Tracker, "tracker"),
-                (View::Timer, "timer"),
-                (View::Summary, "summary"),
-                (View::Log, "log"),
-            ] {
-                if theme::nav_link(ui, label, self.view == view).clicked() {
-                    self.set_view(view);
-                }
-            }
-        });
-    }
 
     fn window_controls(&mut self, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.x = 1.0;
@@ -1033,7 +1048,7 @@ impl App {
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                menu_frame(ui, |ui| {
+                menu_frame(ui, self.ceramic.id(), |ui| {
                     ui.label(theme::tc("set state", 11.0, theme::MUTED));
                     if menu_item(ui, "working on it") {
                         new_state = Some("doing");
@@ -1092,7 +1107,7 @@ impl App {
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                menu_frame(ui, |ui| {
+                menu_frame(ui, self.ceramic.id(), |ui| {
                     if subject.focused_min > 0 {
                         ui.label(theme::tc(
                             format!("{} focused", views::fmt_hm(subject.focused_min)),
@@ -1177,17 +1192,17 @@ impl App {
                 | DialogKind::ConfirmDeleteCategory(..)
         );
         let mut action: Option<bool> = None;
-        egui::Window::new("dialog")
-            .id(egui::Id::new("lockin-dialog"))
-            .title_bar(false)
-            .fade_in(false)
-            .resizable(false)
-            .collapsible(false)
+        egui::Area::new(egui::Id::new("lockin-dialog"))
+            .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .frame(theme::popup_frame())
+            .fade_in(false)
             .show(ctx, |ui| {
-                {
-                    ui.set_width(if confirm_only { 360.0 } else { 340.0 });
+                theme::textured_panel(
+                    ui,
+                    self.ceramic.id(),
+                    Some(if confirm_only { 360.0 } else { 340.0 }),
+                    egui::Margin::symmetric(16, 12),
+                    |ui| {
                     ui.horizontal(|ui| {
                         ui.label(theme::b(dialog.title.clone(), 13.0).color(theme::BRIGHT));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1225,7 +1240,7 @@ impl App {
                             action = Some(false);
                         }
                     });
-                }
+                });
             });
 
         match action {
@@ -1312,7 +1327,11 @@ fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> TextureHandle 
             let rgba = img.to_rgba8();
             let size = [rgba.width() as usize, rgba.height() as usize];
             let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-            ctx.load_texture(name, color, TextureOptions::NEAREST)
+            let mut options = TextureOptions::NEAREST;
+            if name == "ceramic" {
+                options.wrap_mode = egui::TextureWrapMode::Repeat;
+            }
+            ctx.load_texture(name, color, options)
         }
         Err(_) => ctx.load_texture(
             name,
@@ -1371,17 +1390,12 @@ fn popup_close(ui: &mut Ui) -> bool {
     response.clicked()
 }
 
-pub fn menu_frame<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    egui::Frame::none()
-        .fill(theme::FIELD)
-        .stroke(Stroke::new(1.0, theme::BEVEL_HI))
-        .inner_margin(egui::Margin::symmetric(4, 4))
-        .show(ui, |ui| {
-            ui.set_min_width(132.0);
-            ui.spacing_mut().item_spacing = Vec2::new(4.0, 2.0);
-            add(ui)
-        })
-        .inner
+pub fn menu_frame<R>(ui: &mut Ui, tex: egui::TextureId, add: impl FnOnce(&mut Ui) -> R) -> R {
+    theme::textured_panel(ui, tex, None, egui::Margin::symmetric(6, 5), |ui| {
+        ui.set_min_width(132.0);
+        ui.spacing_mut().item_spacing = Vec2::new(4.0, 2.0);
+        add(ui)
+    })
 }
 
 pub fn menu_item(ui: &mut Ui, text: &str) -> bool {

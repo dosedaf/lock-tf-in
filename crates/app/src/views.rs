@@ -125,17 +125,17 @@ impl App {
         let cur_cat = self.pomo.category.as_ref().map(|c| c.id);
         let cur_subj = self.pomo.subject.as_ref().map(|s| s.id);
 
-        egui::Window::new("settings")
-            .id(egui::Id::new("settings-popup"))
-            .title_bar(false)
-            .fade_in(false)
-            .resizable(false)
-            .collapsible(false)
+        egui::Area::new(egui::Id::new("settings-popup"))
+            .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .frame(theme::popup_frame())
+            .fade_in(false)
             .show(ctx, |ui| {
-                {
-                    ui.set_width(540.0);
+                theme::textured_panel(
+                    ui,
+                    self.ceramic.id(),
+                    Some(540.0),
+                    egui::Margin::symmetric(16, 12),
+                    |ui| {
                     ui.horizontal(|ui| {
                         ui.label(theme::b("settings", 13.0).color(theme::BRIGHT));
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -249,7 +249,7 @@ impl App {
                                 }
                             });
                     });
-                }
+                });
             });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -351,7 +351,7 @@ impl App {
         let width = ui.available_width();
         let (row, response) = ui.allocate_exact_size(egui::Vec2::new(width, 22.0), egui::Sense::click_and_drag());
         let hovered = response.hovered();
-        let collapsed = self.group_collapsed.contains(&group.id);
+        let collapsed = !self.group_expanded.contains(&group.id);
         let caret_rect = egui::Rect::from_min_size(row.min, egui::Vec2::new(16.0, row.height()));
         let caret_resp = ui.interact(caret_rect, ui.id().with(("gcaret", group.id)), egui::Sense::click());
         theme::paint_caret(
@@ -363,10 +363,11 @@ impl App {
         );
         if caret_resp.clicked() {
             if collapsed {
-                self.group_collapsed.remove(&group.id);
+                self.group_expanded.insert(group.id);
             } else {
-                self.group_collapsed.insert(group.id);
+                self.group_expanded.remove(&group.id);
             }
+            self.save_tracker_collapse();
         }
         if caret_resp.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -496,6 +497,7 @@ impl App {
             });
             if clicked {
                 self.hold_collapsed = !self.hold_collapsed;
+                self.save_tracker_collapse();
             }
             if !self.hold_collapsed {
                 for s in &hold {
@@ -517,6 +519,7 @@ impl App {
             });
             if clicked {
                 self.done_collapsed_trk = !self.done_collapsed_trk;
+                self.save_tracker_collapse();
             }
             if !self.done_collapsed_trk {
                 for s in &done {
@@ -538,6 +541,7 @@ impl App {
             });
             if clicked {
                 self.drop_collapsed = !self.drop_collapsed;
+                self.save_tracker_collapse();
             }
             if !self.drop_collapsed {
                 for s in &dropped {

@@ -1,6 +1,6 @@
 use eframe::egui::{
     self, Color32, FontData, FontDefinitions, FontFamily, FontId, Pos2, Rect, Response, RichText,
-    Sense, Stroke, Vec2,
+    Sense, Stroke, Ui, Vec2,
 };
 
 pub const BG: Color32 = Color32::from_rgb(0x28, 0x18, 0x00);
@@ -488,15 +488,68 @@ pub fn paint_link_arrow(painter: &egui::Painter, rect: Rect, color: Color32) {
 }
 
 
-pub fn popup_frame() -> egui::Frame {
-    egui::Frame::none()
-        .fill(FIELD)
-        .stroke(Stroke::new(1.0_f32, BEVEL_HI))
-        .shadow(egui::epaint::Shadow {
-            offset: [4, 4],
-            blur: 0,
-            spread: 0,
-            color: Color32::BLACK,
-        })
-        .inner_margin(egui::Margin::symmetric(16, 12))
+
+
+/// Paint the ceramic texture behind a popup/menu, then let the content sit on top.
+/// `tex` must be the ceramic texture loaded with repeat wrapping.
+pub fn textured_panel<R>(
+    ui: &mut Ui,
+    tex: egui::TextureId,
+    width: Option<f32>,
+    margin: egui::Margin,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> R {
+    let bg_idx = ui.painter().add(egui::Shape::Noop);
+    let inner = egui::Frame::none()
+        .inner_margin(margin)
+        .show(ui, |ui| {
+            if let Some(width) = width {
+                ui.set_width(width);
+            }
+            add(ui)
+        });
+    let rect = inner.response.rect;
+    let screen = ui.ctx().screen_rect();
+    let tile = 480.0;
+    let uv = Rect::from_min_max(
+        Pos2::new(
+            (rect.left() - screen.left()) / tile,
+            (rect.top() - screen.top()) / tile,
+        ),
+        Pos2::new(
+            (rect.right() - screen.left()) / tile,
+            (rect.bottom() - screen.top()) / tile,
+        ),
+    );
+    let mut shapes = Vec::with_capacity(4);
+    shapes.push(egui::Shape::rect_filled(
+        rect.translate(Vec2::new(4.0, 4.0)),
+        0.0,
+        Color32::BLACK,
+    ));
+    shapes.push(egui::Shape::image(tex, rect, uv, Color32::WHITE));
+    shapes.push(egui::Shape::rect_filled(
+        rect,
+        0.0,
+        Color32::from_rgba_unmultiplied(16, 10, 3, 145),
+    ));
+    shapes.push(egui::Shape::line_segment(
+        [rect.left_top(), rect.right_top()],
+        Stroke::new(1.0_f32, BEVEL_LO),
+    ));
+    shapes.push(egui::Shape::line_segment(
+        [rect.left_top(), rect.left_bottom()],
+        Stroke::new(1.0_f32, BEVEL_LO),
+    ));
+    shapes.push(egui::Shape::line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0_f32, BEVEL_HI),
+    ));
+    shapes.push(egui::Shape::line_segment(
+        [rect.right_top(), rect.right_bottom()],
+        Stroke::new(1.0_f32, BEVEL_HI),
+    ));
+    ui.painter()
+        .set(bg_idx, egui::Shape::Vec(shapes));
+    inner.inner
 }
