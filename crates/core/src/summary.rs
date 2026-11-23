@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{Datelike, Duration, Local, NaiveDate};
 use rusqlite::params;
+use rusqlite::OptionalExtension;
 
 use crate::db::{today_str, Db};
 use crate::model::{Bucket, DailyCategory, Summary};
@@ -169,7 +170,7 @@ impl Db {
             .format("%Y-%m-%d")
             .to_string();
         let mut stmt = self.conn.prepare(
-            "SELECT p.id, p.started_at, p.ended_at, p.minutes, c.name, p.task_label, p.source \
+            "SELECT p.id, p.started_at, p.ended_at, p.minutes, p.category_id, p.subject_id, c.name, p.task_label, p.source \
              FROM pomo_periods p LEFT JOIN categories c ON c.id=p.category_id \
              WHERE substr(p.started_at,1,10)>=? ORDER BY p.started_at DESC LIMIT 500",
         )?;
@@ -179,12 +180,91 @@ impl Db {
                 started_at: r.get(1)?,
                 ended_at: r.get(2)?,
                 minutes: r.get(3)?,
-                category_name: r.get(4)?,
-                task_label: r.get(5)?,
-                source: r.get(6)?,
+                category_id: r.get(4)?,
+                subject_id: r.get(5)?,
+                category_name: r.get(6)?,
+                task_label: r.get(7)?,
+                source: r.get(8)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn add_manual_period(
+        &self,
+        started_at: &str,
+        ended_at: &str,
+        minutes: i64,
+        category_id: Option<i64>,
+        subject_id: Option<i64>,
+    ) -> Result<i64> {
+        self.validate_period(started_at, ended_at, minutes, category_id, subject_id)?;
+        self.conn.execute(
+            "INSERT INTO pomo_periods \
+             (session_id, day_id, category_id, subject_id, task_id, task_label, minutes, started_at, ended_at, source) \
+             VALUES (NULL, NULL, ?, ?, NULL, '', ?, ?, ?, 'manual')",
+            params![category_id, subject_id, minutes, started_at, ended_at],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn update_manual_period(
+        &self,
+        id: i64,
+        started_at: &str,
+        ended_at: &str,
+        minutes: i64,
+        category_id: Option<i64>,
+        subject_id: Option<i64>,
+    ) -> Result<()> {
+        self.validate_period(started_at, ended_at, minutes, category_id, subject_id)?;
+        let changed = self.conn.execute(
+            "UPDATE pomo_periods SET category_id=?, subject_id=?, minutes=?, started_at=?, ended_at=? WHERE id=?",
+            params![category_id, subject_id, minutes, started_at, ended_at, id],
+        )?;
+        anyhow::ensure!(changed > 0, "period not found");
+        Ok(())
+    }
+
+    fn validate_period(
+        &self,
+        started_at: &str,
+        ended_at: &str,
+        minutes: i64,
+        category_id: Option<i64>,
+        subject_id: Option<i64>,
+    ) -> Result<()> {
+        let start =
+            crate::db::parse_iso(started_at).ok_or_else(|| anyhow::anyhow!("invalid start"))?;
+        let end = crate::db::parse_iso(ended_at).ok_or_else(|| anyhow::anyhow!("invalid end"))?;
+        anyhow::ensure!(end > start, "end must be after start");
+        anyhow::ensure!((1..=1440).contains(&minutes), "minutes must be 1..1440");
+        if let Some(cat) = category_id {
+            anyhow::ensure!(
+                self.conn
+                    .query_row("SELECT 1 FROM categories WHERE id=?", params![cat], |r| r
+                        .get::<_, i64>(
+                        0
+                    ))
+                    .optional()?
+                    .is_some(),
+                "category not found"
+            );
+        }
+        if let Some(sub) = subject_id {
+            anyhow::ensure!(
+                self.conn
+                    .query_row(
+                        "SELECT 1 FROM tracker_subjects WHERE id=?",
+                        params![sub],
+                        |r| r.get::<_, i64>(0)
+                    )
+                    .optional()?
+                    .is_some(),
+                "subject not found"
+            );
+        }
+        Ok(())
     }
 
     pub fn delete_period(&self, id: i64) -> Result<()> {

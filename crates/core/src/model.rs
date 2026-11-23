@@ -180,6 +180,8 @@ pub struct PeriodRow {
     pub started_at: String,
     pub ended_at: String,
     pub minutes: i64,
+    pub category_id: Option<i64>,
+    pub subject_id: Option<i64>,
     pub category_name: Option<String>,
     pub task_label: String,
     pub source: String,

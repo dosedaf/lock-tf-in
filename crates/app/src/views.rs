@@ -1,5 +1,6 @@
 use crate::app::{App, DialogKind};
 use crate::theme;
+use chrono::{Duration as ChronoDuration, NaiveDate, NaiveDateTime, NaiveTime};
 use eframe::egui::{self, Align, Layout, Ui};
 use lockin_core::PomoAction;
 
@@ -1266,6 +1267,119 @@ impl App {
         }
     }
 
+    fn commit_log(&mut self) {
+        let date = match NaiveDate::parse_from_str(self.log_date.trim(), "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => {
+                self.log_msg = Some((
+                    "date must be YYYY-MM-DD".into(),
+                    false,
+                    std::time::Instant::now(),
+                ));
+                return;
+            }
+        };
+        let start_time = match NaiveTime::parse_from_str(self.log_start.trim(), "%H:%M") {
+            Ok(t) => t,
+            Err(_) => {
+                self.log_msg = Some((
+                    "start must be HH:MM".into(),
+                    false,
+                    std::time::Instant::now(),
+                ));
+                return;
+            }
+        };
+        let start = NaiveDateTime::new(date, start_time);
+        let end = if !self.log_end.trim().is_empty() {
+            match NaiveTime::parse_from_str(self.log_end.trim(), "%H:%M") {
+                Ok(t) => {
+                    let mut e = NaiveDateTime::new(date, t);
+                    if e <= start {
+                        e += ChronoDuration::days(1);
+                    }
+                    e
+                }
+                Err(_) => {
+                    self.log_msg =
+                        Some(("end must be HH:MM".into(), false, std::time::Instant::now()));
+                    return;
+                }
+            }
+        } else if let Ok(m) = self.log_minutes.trim().parse::<i64>() {
+            if !(1..=1440).contains(&m) {
+                self.log_msg = Some((
+                    "minutes must be 1..1440".into(),
+                    false,
+                    std::time::Instant::now(),
+                ));
+                return;
+            }
+            start + ChronoDuration::minutes(m)
+        } else {
+            self.log_msg = Some((
+                "enter an end time or minutes".into(),
+                false,
+                std::time::Instant::now(),
+            ));
+            return;
+        };
+        let minutes = (end - start).num_minutes() as i64;
+        if !(1..=1440).contains(&minutes) {
+            self.log_msg = Some((
+                "duration must be 1..1440 minutes".into(),
+                false,
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+        let started_at = start.format("%Y-%m-%dT%H:%M:%S").to_string();
+        let ended_at = end.format("%Y-%m-%dT%H:%M:%S").to_string();
+        let result = if let Some(id) = self.log_editing {
+            self.db.update_manual_period(
+                id,
+                &started_at,
+                &ended_at,
+                minutes,
+                self.log_category,
+                self.log_subject,
+            )
+        } else {
+            self.db
+                .add_manual_period(
+                    &started_at,
+                    &ended_at,
+                    minutes,
+                    self.log_category,
+                    self.log_subject,
+                )
+                .map(|_| ())
+        };
+        match result {
+            Ok(()) => {
+                self.reload_periods();
+                self.log_msg = Some((
+                    format!(
+                        "{} {} minutes",
+                        if self.log_editing.is_some() {
+                            "updated"
+                        } else {
+                            "logged"
+                        },
+                        minutes
+                    ),
+                    true,
+                    std::time::Instant::now(),
+                ));
+                self.log_editing = None;
+                self.log_minutes.clear();
+            }
+            Err(e) => {
+                self.log_msg = Some((e.to_string(), false, std::time::Instant::now()));
+            }
+        }
+    }
+
     pub fn view_settings(&mut self, ui: &mut Ui) {
         if self.settings_needs_sync {
             let (w, h) = self.native_window_size(ui.ctx());
@@ -1400,7 +1514,120 @@ impl App {
         }
         let mut import_preview = false;
         let mut import_now = false;
-        ui.add_space(6.0);
+
+        ui.add_space(4.0);
+        ui.label(theme::b("log time", 13.0).color(theme::GOLD));
+        ui.horizontal_wrapped(|ui| {
+            ui.label(theme::i("date", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [96.0, 24.0],
+                egui::TextEdit::singleline(&mut self.log_date)
+                    .hint_text("YYYY-MM-DD")
+                    .font(theme::regular_font(13.0)),
+            );
+            ui.label(theme::i("start", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [58.0, 24.0],
+                egui::TextEdit::singleline(&mut self.log_start)
+                    .hint_text("HH:MM")
+                    .font(theme::regular_font(13.0)),
+            );
+            ui.label(theme::i("end", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [58.0, 24.0],
+                egui::TextEdit::singleline(&mut self.log_end)
+                    .hint_text("HH:MM")
+                    .font(theme::regular_font(13.0)),
+            );
+            ui.label(theme::i("or min", 12.0).color(theme::MUTED));
+            ui.add_sized(
+                [48.0, 24.0],
+                egui::TextEdit::singleline(&mut self.log_minutes)
+                    .hint_text("min")
+                    .font(theme::regular_font(13.0)),
+            );
+            let action = if self.log_editing.is_some() {
+                "save"
+            } else {
+                "add"
+            };
+            if theme::link(ui, action, 13.0, theme::RED).clicked() {
+                self.commit_log();
+            }
+            if self.log_editing.is_some() && theme::link(ui, "cancel", 12.0, theme::MUTED).clicked()
+            {
+                self.log_editing = None;
+                self.log_msg = None;
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(theme::i("category", 12.0).color(theme::MUTED));
+            let cats = self.categories.clone();
+            let selected = cats
+                .iter()
+                .find(|c| Some(c.id) == self.log_category)
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "Unallocated".into());
+            egui::ComboBox::from_id_salt("log-cat")
+                .width(150.0)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.log_category.is_none(), "Unallocated")
+                        .clicked()
+                    {
+                        self.log_category = None;
+                    }
+                    for c in &cats {
+                        if ui
+                            .selectable_label(Some(c.id) == self.log_category, &c.name)
+                            .clicked()
+                        {
+                            self.log_category = Some(c.id);
+                        }
+                    }
+                });
+            ui.label(theme::i("subject", 12.0).color(theme::MUTED));
+            let subjects = self.subjects.clone();
+            let selected = subjects
+                .iter()
+                .find(|(id, _, _)| Some(*id) == self.log_subject)
+                .map(|(_, name, _)| name.clone())
+                .unwrap_or_else(|| "none".into());
+            egui::ComboBox::from_id_salt("log-subj")
+                .width(180.0)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.log_subject.is_none(), "none")
+                        .clicked()
+                    {
+                        self.log_subject = None;
+                    }
+                    for (id, name, group) in &subjects {
+                        if ui
+                            .selectable_label(
+                                Some(*id) == self.log_subject,
+                                format!("{group} · {name}"),
+                            )
+                            .clicked()
+                        {
+                            self.log_subject = Some(*id);
+                        }
+                    }
+                });
+        });
+        if let Some((msg, ok, at)) = &self.log_msg {
+            if at.elapsed().as_secs() < 4 {
+                ui.label(theme::tc(
+                    msg,
+                    12.0,
+                    if *ok { theme::MUTED } else { theme::RED_HOT },
+                ));
+            }
+        }
+
+        ui.add_space(12.0);
         if theme::link(ui, "import from pomofocus", 17.0, theme::RED).clicked() {
             self.import_open = !self.import_open;
         }
@@ -1442,12 +1669,13 @@ impl App {
         if self.periods_open {
             ui.add_space(8.0);
             let mut delete: Option<i64> = None;
+            let mut edit: Option<i64> = None;
             egui::Grid::new("log-table")
-                .num_columns(5)
-                .spacing([25.0, 3.0])
+                .num_columns(6)
+                .spacing([18.0, 3.0])
                 .striped(false)
                 .show(ui, |ui| {
-                    for h in ["date", "range", "category", "min", ""] {
+                    for h in ["date", "range", "category", "min", "", ""] {
                         ui.label(theme::i(h, 11.0).color(theme::MUTED));
                     }
                     ui.end_row();
@@ -1469,6 +1697,9 @@ impl App {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(theme::t(p.minutes.to_string(), 13.0).color(theme::BRIGHT));
                         });
+                        if theme::link(ui, "edit", 11.0, theme::RED).clicked() {
+                            edit = Some(p.id);
+                        }
                         let (rect, resp) = ui
                             .allocate_exact_size(egui::Vec2::new(12.0, 14.0), egui::Sense::click());
                         let color = if resp.hovered() {
@@ -1486,9 +1717,39 @@ impl App {
             if self.periods.is_empty() {
                 theme::empty_note(ui, "no periods", 16.0);
             }
+            if let Some(id) = edit {
+                if let Some((date, start, end, minutes, cat, sub)) =
+                    self.periods.iter().find(|p| p.id == id).map(|p| {
+                        (
+                            p.started_at.get(..10).unwrap_or("").to_string(),
+                            p.started_at.get(11..16).unwrap_or("").to_string(),
+                            p.ended_at.get(11..16).unwrap_or("").to_string(),
+                            p.minutes.to_string(),
+                            p.category_id,
+                            p.subject_id,
+                        )
+                    })
+                {
+                    self.log_date = date;
+                    self.log_start = start;
+                    self.log_end = end;
+                    self.log_minutes = minutes;
+                    self.log_category = cat;
+                    self.log_subject = sub;
+                    self.log_editing = Some(id);
+                    self.log_msg = Some((
+                        format!("editing period #{id}"),
+                        true,
+                        std::time::Instant::now(),
+                    ));
+                }
+            }
             if let Some(id) = delete {
                 let _ = self.db.delete_period(id);
                 self.reload_periods();
+                if self.log_editing == Some(id) {
+                    self.log_editing = None;
+                }
             }
         }
 

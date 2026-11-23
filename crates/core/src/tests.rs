@@ -184,3 +184,60 @@ fn groups_reorder() {
     drop(db);
     cleanup(&path);
 }
+
+#[test]
+fn manual_period_add_update_and_summary() {
+    let (db, path) = temp_db("manual-period");
+    let cat = db.add_category("work").unwrap();
+    let group = db.add_group("g").unwrap();
+    let sub = db
+        .add_subject(group, "subject", "other", "", "", None)
+        .unwrap();
+    let id = db
+        .add_manual_period(
+            "2026-11-22T14:00:00",
+            "2026-11-22T18:00:00",
+            240,
+            Some(cat),
+            None,
+        )
+        .unwrap();
+    let p = db
+        .periods(365)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap();
+    assert_eq!(p.minutes, 240);
+    assert_eq!(p.category_name.as_deref(), Some("work"));
+    assert_eq!(p.category_id, Some(cat));
+    assert_eq!(p.subject_id, None);
+
+    db.update_manual_period(
+        id,
+        "2026-11-22T13:00:00",
+        "2026-11-22T15:30:00",
+        150,
+        Some(cat),
+        Some(sub),
+    )
+    .unwrap();
+    let p = db
+        .periods(365)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap();
+    assert_eq!(p.minutes, 150);
+    assert_eq!(p.subject_id, Some(sub));
+    assert_eq!(db.summary().unwrap().total_min, 150);
+
+    assert!(db
+        .add_manual_period("2026-11-22T14:00:00", "2026-11-22T13:00:00", 60, None, None)
+        .is_err());
+    assert!(db
+        .add_manual_period("2026-11-22T14:00:00", "2026-11-22T15:00:00", 0, None, None)
+        .is_err());
+    drop(db);
+    cleanup(&path);
+}
