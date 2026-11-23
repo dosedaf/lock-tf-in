@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 todo.db
+target/
+todo.db-wal
+todo.db-shm
