@@ -192,3 +192,29 @@ impl Db {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_pomofocus_rows() {
+        let text = "23-Sep-2026\n14:39 ~ 16:56\nclickhouse\n113\n\n22-Sep-2026\n18:22 ~ 20:00\nvideo related\n94";
+        let rows = parse_pomofocus(text);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].project, "clickhouse");
+        assert_eq!(rows[0].minutes, 113);
+        assert_eq!(rows[0].start, "2026-09-23T14:39:00");
+        assert_eq!(rows[0].end, "2026-09-23T16:56:00");
+        assert_eq!(rows[1].project, "video related");
+        assert_eq!(rows[1].minutes, 94);
+    }
+
+    #[test]
+    fn crosses_midnight() {
+        let text = "01-Jan-2026\n23:30 ~ 00:30\nlate\n60";
+        let rows = parse_pomofocus(text);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].end, "2026-01-02T00:30:00");
+    }
+}

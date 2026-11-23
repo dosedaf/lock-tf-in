@@ -194,3 +194,15 @@ impl Db {
 fn _unused(d: chrono::NaiveDate) -> i32 {
     d.year()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::hm;
+    #[test]
+    fn formats_hours() {
+        assert_eq!(hm(0), "0m");
+        assert_eq!(hm(45), "45m");
+        assert_eq!(hm(60), "1h");
+        assert_eq!(hm(113), "1h 53m");
+    }
+}

@@ -716,6 +716,7 @@ impl App {
         if self.db.add_task(&text, "").is_ok() {
             self.reload_tasks();
             self.add_text.clear();
+            self.add_open = false;
         }
     }
 

@@ -89,6 +89,25 @@ fn listen_single_instance(ctx: &egui::Context) {
     });
 }
 
+fn app_icon() -> egui::IconData {
+    let bytes = include_bytes!("../../../assets/img/icon.png");
+    match image::load_from_memory(bytes) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            egui::IconData {
+                rgba: rgba.as_raw().clone(),
+                width: rgba.width(),
+                height: rgba.height(),
+            }
+        }
+        Err(_) => egui::IconData {
+            rgba: vec![0, 0, 0, 255],
+            width: 1,
+            height: 1,
+        },
+    }
+}
+
 fn main() -> eframe::Result {
     let (db_arg, quit_existing) = parse_args();
     let db_path = resolve_db(db_arg);
@@ -102,7 +121,8 @@ fn main() -> eframe::Result {
             .with_title("LOCK IN")
             .with_inner_size([1280.0, 860.0])
             .with_min_inner_size([860.0, 600.0])
-            .with_app_id("org.lockin.app"),
+            .with_app_id("org.lockin.app")
+            .with_icon(app_icon()),
         ..Default::default()
     };
 
