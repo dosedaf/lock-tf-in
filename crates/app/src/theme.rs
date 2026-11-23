@@ -107,15 +107,19 @@ pub fn install(ctx: &egui::Context) {
     style.visuals.widgets.noninteractive.bg_fill = Color32::TRANSPARENT;
     style.visuals.widgets.noninteractive.bg_stroke = Stroke::NONE;
     style.visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
+    style.visuals.widgets.inactive.weak_bg_fill = FIELD;
     style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, LINE_SOFT);
     style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, GOLD);
     style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(0x33, 0x20, 0x0a);
+    style.visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x33, 0x20, 0x0a);
     style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, BEVEL_HI);
     style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, BRIGHT);
     style.visuals.widgets.active.bg_fill = Color32::from_rgb(0x40, 0x28, 0x10);
+    style.visuals.widgets.active.weak_bg_fill = Color32::from_rgb(0x40, 0x28, 0x10);
     style.visuals.widgets.active.bg_stroke = Stroke::new(1.0, RED);
     style.visuals.widgets.active.fg_stroke = Stroke::new(1.0, BRIGHT);
     style.visuals.widgets.open.bg_fill = Color32::from_rgb(0x33, 0x20, 0x0a);
+    style.visuals.widgets.open.weak_bg_fill = Color32::from_rgb(0x33, 0x20, 0x0a);
     style.visuals.widgets.open.bg_stroke = Stroke::new(1.0, BEVEL_HI);
     style.visuals.widgets.open.fg_stroke = Stroke::new(1.0, BRIGHT);
     style.spacing.item_spacing = Vec2::new(8.0, 4.0);
@@ -405,4 +409,80 @@ pub fn caret_link(ui: &mut egui::Ui, text: &str, caret: Caret) -> Response {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     response
+}
+
+pub fn text_width(ui: &egui::Ui, text: &str, font: FontId) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), font, GOLD)
+        .size()
+        .x
+}
+
+pub fn centered_big(ui: &mut egui::Ui, text: &str, size: f32, color: Color32) {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), FontId::new(size, bold_family()), color);
+    let h = galley.size().y;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
+    ui.painter().galley(
+        Pos2::new(rect.center().x - galley.size().x / 2.0, rect.top()),
+        galley,
+        color,
+    );
+}
+
+
+pub fn paint_kebab(painter: &egui::Painter, center: Pos2, color: Color32) {
+    for dx in [-3.0, 0.0, 3.0] {
+        painter.circle_filled(Pos2::new(center.x + dx, center.y), 1.0, color);
+    }
+}
+
+pub fn paint_star(painter: &egui::Painter, center: Pos2, radius: f32, filled: bool, color: Color32) {
+    let mut points = Vec::with_capacity(10);
+    for i in 0..10 {
+        let r = if i % 2 == 0 { radius } else { radius * 0.45 };
+        let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 5.0;
+        points.push(Pos2::new(center.x + a.cos() * r, center.y + a.sin() * r));
+    }
+    if filled {
+        painter.add(egui::Shape::convex_polygon(points, color, Stroke::NONE));
+    } else {
+        let mut closed = points.clone();
+        closed.push(points[0]);
+        painter.add(egui::Shape::line(closed, Stroke::new(1.0_f32, color)));
+    }
+}
+
+pub fn paint_trash(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let lid_y = rect.top() + 2.0;
+    painter.line_segment(
+        [Pos2::new(rect.left() + 1.0, lid_y), Pos2::new(rect.right() - 1.0, lid_y)],
+        Stroke::new(1.0_f32, color),
+    );
+    painter.line_segment(
+        [
+            Pos2::new(rect.left() + 3.5, lid_y - 1.5),
+            Pos2::new(rect.right() - 3.5, lid_y - 1.5),
+        ],
+        Stroke::new(1.0_f32, color),
+    );
+    let body = Rect::from_min_max(
+        Pos2::new(rect.left() + 2.5, lid_y + 1.5),
+        Pos2::new(rect.right() - 2.5, rect.bottom() - 1.0),
+    );
+    painter.rect_stroke(body, 0.0, Stroke::new(1.0_f32, color), egui::StrokeKind::Middle);
+}
+
+pub fn paint_link_arrow(painter: &egui::Painter, rect: Rect, color: Color32) {
+    let a = Pos2::new(rect.left() + 1.0, rect.bottom() - 1.0);
+    let b = Pos2::new(rect.right() - 1.0, rect.top() + 1.0);
+    painter.line_segment([a, b], Stroke::new(1.0_f32, color));
+    painter.line_segment(
+        [
+            Pos2::new(b.x - 3.0, b.y),
+            Pos2::new(b.x, b.y + 3.0),
+        ],
+        Stroke::new(1.0_f32, color),
+    );
 }

@@ -31,6 +31,7 @@ impl View {
     }
 }
 
+#[derive(Clone)]
 pub struct Dialog {
     pub title: String,
     pub label: String,
@@ -39,6 +40,7 @@ pub struct Dialog {
     pub error: Option<String>,
 }
 
+#[derive(Clone)]
 pub enum DialogKind {
     AddGroup,
     RenameGroup(i64),
@@ -83,6 +85,7 @@ pub struct App {
     pub category_new: String,
 
     pub summary: Option<lockin_core::Summary>,
+    pub months: Vec<String>,
     pub periods: Vec<lockin_core::PeriodRow>,
     pub periods_loaded: bool,
     pub periods_days: i64,
@@ -104,6 +107,9 @@ pub struct App {
     pub add_subject_group: Option<i64>,
     pub add_subject_text: String,
     pub tracker_focus_edit: Option<String>,
+    pub trk_name: String,
+    pub trk_url: String,
+    pub trk_notes: String,
 
     pub dialog: Option<Dialog>,
     pub hl_phrase: String,
@@ -162,9 +168,17 @@ impl App {
             .unwrap_or(0);
 
         let month = chrono::Local::now().format("%Y-%m").to_string();
-        Self {
+        let months = db.months().unwrap_or_default();
+        let initial_view = match std::env::var("LOCKIN_VIEW").unwrap_or_default().as_str() {
+            "tracker" => View::Tracker,
+            "timer" => View::Timer,
+            "summary" => View::Summary,
+            "log" => View::Log,
+            _ => View::Tasks,
+        };
+        let mut app = Self {
             db,
-            view: View::Tasks,
+            view: initial_view,
             tasks,
             stats,
             tasks_expanded: false,
@@ -191,6 +205,7 @@ impl App {
             cfg_msg: None,
             category_new: String::new(),
             summary: None,
+            months,
             periods: Vec::new(),
             periods_loaded: false,
             periods_days: 60,
@@ -211,6 +226,9 @@ impl App {
             add_subject_group: None,
             add_subject_text: String::new(),
             tracker_focus_edit: None,
+            trk_name: String::new(),
+            trk_url: String::new(),
+            trk_notes: String::new(),
             dialog: None,
             hl_phrase: phrases[seed % phrases.len()].to_string(),
             hidden: false,
@@ -225,7 +243,23 @@ impl App {
                 .filter(|s| !s.is_empty())
                 .map(std::path::PathBuf::from),
             frames: 0,
+        };
+        if std::env::var("LOCKIN_LOG_OPEN").ok().as_deref() == Some("periods") {
+            app.periods_open = true;
         }
+        if std::env::var("LOCKIN_SETTINGS").ok().as_deref() == Some("1") {
+            app.settings_open = true;
+            app.cfg_focus = app.pomo.focus_min.to_string();
+            app.cfg_break = app.pomo.break_min.to_string();
+            app.cfg_auto = app.pomo.auto_next;
+        }
+        match app.view {
+            View::Tracker => app.reload_tracker(),
+            View::Summary => app.reload_summary(),
+            View::Log => app.reload_periods(),
+            _ => {}
+        }
+        app
     }
 
     // ---------------------------------------------------------------- data
@@ -249,12 +283,26 @@ impl App {
     }
 
     pub fn reload_tracker(&mut self) {
-        self.tracker = self.db.tracker_payload().ok();
-        self.subjects = load_subjects(&self.db);
+        let payload = self.db.tracker_payload().ok();
+        self.subjects = payload
+            .as_ref()
+            .map(|p| {
+                p.groups
+                    .iter()
+                    .flat_map(|g| {
+                        g.subjects.iter().filter(|s| s.state != "dropped").map(move |s| {
+                            (s.id, s.name.clone(), g.name.clone())
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.tracker = payload;
     }
 
     pub fn reload_summary(&mut self) {
         self.summary = self.db.summary().ok();
+        self.months = self.db.months().unwrap_or_default();
     }
 
     pub fn reload_periods(&mut self) {
@@ -946,9 +994,222 @@ impl App {
         }
     }
 
-    fn tracker_menu_window(&mut self, _ctx: &egui::Context) {}
+    fn tracker_menu_window(&mut self, ctx: &egui::Context) {
+        let Some((id, pos)) = self.tracker_menu else { return };
+        let subject = self.tracker.as_ref().and_then(|t| {
+            t.groups
+                .iter()
+                .flat_map(|g| g.subjects.iter())
+                .find(|s| s.id == id)
+                .cloned()
+        });
+        let Some(subject) = subject else {
+            self.tracker_menu = None;
+            return;
+        };
+        let mut close = false;
+        let mut set_state: Option<&'static str> = None;
+        let mut clear_snooze = false;
+        let mut delete = false;
+        egui::Area::new(egui::Id::new("tracker-menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                menu_frame(ui, |ui| {
+                    if subject.focused_min > 0 {
+                        ui.label(theme::tc(
+                            format!("{} focused", views::fmt_hm(subject.focused_min)),
+                            11.0,
+                            theme::MUTED,
+                        ));
+                    }
+                    if subject.state == "paused" {
+                        if menu_item(ui, "resume") {
+                            set_state = Some("doing");
+                            close = true;
+                        }
+                    } else if !matches!(subject.state.as_str(), "done" | "dropped") {
+                        if menu_item(ui, "on hold") {
+                            set_state = Some("paused");
+                            close = true;
+                        }
+                    }
+                    if subject.state == "dropped" {
+                        if menu_item(ui, "restore") {
+                            set_state = Some("todo");
+                            close = true;
+                        }
+                    } else if !matches!(subject.state.as_str(), "done" | "dropped") {
+                        if menu_item(ui, "drop this") {
+                            set_state = Some("dropped");
+                            close = true;
+                        }
+                    }
+                    if subject.snoozed {
+                        if menu_item(ui, "clear snooze") {
+                            clear_snooze = true;
+                            close = true;
+                        }
+                    }
+                    if menu_item(ui, "delete") {
+                        delete = true;
+                        close = true;
+                    }
+                });
+            });
+        if let Some(state) = set_state {
+            let _ = self.db.subject_state(id, state);
+            self.reload_tracker();
+        }
+        if clear_snooze {
+            let _ = self.db.snooze_subject(id, None, None, "", true);
+            self.reload_tracker();
+        }
+        if delete {
+            self.open_prompt(
+                DialogKind::ConfirmDeleteSubject(id, subject.name.clone()),
+                "delete subject",
+                &format!(
+                    "delete \"{}\"? its progress log and focus-time link go too.",
+                    subject.name
+                ),
+                "",
+            );
+        }
+        if close || (ctx.input(|i| i.pointer.any_click()) && !ctx.is_pointer_over_area()) {
+            self.tracker_menu = None;
+        }
+    }
 
-    fn dialog_window(&mut self, _ctx: &egui::Context) {}
+    pub fn open_prompt(&mut self, kind: DialogKind, title: &str, label: &str, value: &str) {
+        self.dialog = Some(Dialog {
+            title: title.to_string(),
+            label: label.to_string(),
+            value: value.to_string(),
+            kind,
+            error: None,
+        });
+    }
+
+    fn dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.dialog.take() else { return };
+        let screen = ctx.screen_rect();
+        egui::Area::new(egui::Id::new("dialog-dim"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(screen.min)
+            .show(ctx, |ui| {
+                ui.painter().rect_filled(
+                    screen,
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 150),
+                );
+            });
+
+        let confirm_only = matches!(
+            dialog.kind,
+            DialogKind::ConfirmDeleteGroup(..)
+                | DialogKind::ConfirmDeleteSubject(..)
+                | DialogKind::ConfirmDeleteCategory(..)
+        );
+        let mut action: Option<bool> = None;
+        egui::Window::new(dialog.title.clone())
+            .id(egui::Id::new("lockin-dialog"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_min_width(300.0);
+                ui.label(theme::t(dialog.label.clone(), 13.0).color(theme::GOLD));
+                if !confirm_only {
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut dialog.value)
+                            .desired_width(f32::INFINITY)
+                            .font(theme::regular_font(13.0)),
+                    );
+                    edit.request_focus();
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        action = Some(true);
+                    }
+                }
+                if let Some(error) = &dialog.error {
+                    ui.label(theme::tc(error, 12.0, theme::RED_HOT));
+                }
+                ui.horizontal(|ui| {
+                    let yes = if confirm_only { "delete" } else { "ok" };
+                    if theme::bevel(ui, yes, true).clicked() {
+                        action = Some(true);
+                    }
+                    if theme::bevel(ui, "cancel", false).clicked() {
+                        action = Some(false);
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        action = Some(false);
+                    }
+                });
+            });
+
+        match action {
+            None => {
+                self.dialog = Some(dialog);
+            }
+            Some(false) => {}
+            Some(true) => match self.apply_dialog(&dialog) {
+                Ok(()) => {}
+                Err(e) => {
+                    dialog.error = Some(e.to_string());
+                    self.dialog = Some(dialog);
+                }
+            },
+        }
+    }
+
+    fn apply_dialog(&mut self, dialog: &Dialog) -> anyhow::Result<()> {
+        let text = dialog.value.trim().to_string();
+        match &dialog.kind {
+            DialogKind::AddGroup => {
+                anyhow::ensure!(!text.is_empty(), "name required");
+                self.db.add_group(&text)?;
+                self.reload_tracker();
+            }
+            DialogKind::RenameGroup(id) => {
+                anyhow::ensure!(!text.is_empty(), "name required");
+                self.db.rename_group(*id, &text)?;
+                self.reload_tracker();
+            }
+            DialogKind::RenameCategory(id) => {
+                anyhow::ensure!(!text.is_empty(), "name required");
+                self.db.rename_category(*id, &text)?;
+                self.reload_categories();
+            }
+            DialogKind::AddSubject(group) => {
+                anyhow::ensure!(!text.is_empty(), "name required");
+                self.db.add_subject(*group, &text, "other", "", "", None)?;
+                self.reload_tracker();
+            }
+            DialogKind::SnoozeDays(id) => {
+                let days: i64 = text.parse()?;
+                self.db.snooze_subject(*id, Some(days), None, "", false)?;
+                self.reload_tracker();
+            }
+            DialogKind::ConfirmDeleteGroup(id, _, _) => {
+                self.db.delete_group(*id)?;
+                self.reload_tracker();
+            }
+            DialogKind::ConfirmDeleteSubject(id, _) => {
+                self.db.delete_subject(*id)?;
+                self.reload_tracker();
+                if self.tracker_editor == Some(*id) {
+                    self.tracker_editor = None;
+                }
+            }
+            DialogKind::ConfirmDeleteCategory(id, _) => {
+                self.db.delete_category(*id)?;
+                self.reload_categories();
+                self.reload_timer();
+            }
+        }
+        Ok(())
+    }
 }
 
 fn load_subjects(db: &Db) -> Vec<(i64, String, String)> {
