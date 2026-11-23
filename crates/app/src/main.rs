@@ -65,6 +65,18 @@ pub fn pid_path() -> PathBuf {
 }
 
 /// Try to hand off to an already running instance. Returns true if it did.
+fn stop_running() {
+    if let Ok(pid) = std::fs::read_to_string(pid_path()) {
+        let pid = pid.trim().to_string();
+        if !pid.is_empty() && Path::new(&format!("/proc/{pid}")).exists() {
+            let _ = std::process::Command::new("kill").arg(&pid).status();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+    let _ = std::fs::remove_file(socket_path());
+    let _ = std::fs::remove_file(pid_path());
+}
+
 fn hand_off(quit_existing: bool) -> bool {
     let path = socket_path();
     if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&path) {
@@ -145,16 +157,12 @@ fn main() -> eframe::Result {
             let _ = stream.write_all(b"quit");
         }
         std::thread::sleep(std::time::Duration::from_millis(700));
-        if let Ok(pid) = std::fs::read_to_string(pid_path()) {
-            let pid = pid.trim();
-            if !pid.is_empty() && Path::new(&format!("/proc/{pid}")).exists() {
-                let _ = std::process::Command::new("kill").arg(pid).status();
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
-        }
-        let _ = std::fs::remove_file(socket_path());
-        let _ = std::fs::remove_file(pid_path());
+        stop_running();
     } else if hand_off(quit_existing) {
+        if quit_existing {
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            stop_running();
+        }
         return Ok(());
     }
 

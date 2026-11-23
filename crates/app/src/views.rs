@@ -115,6 +115,7 @@ impl App {
             if theme::link(ui, "timer settings", 13.0, theme::RED).clicked() {
                 self.settings_open = !self.settings_open;
                 if self.settings_open {
+                    self.settings_opened_frame = self.frames;
                     self.cfg_focus = self.pomo.focus_min.to_string();
                     self.cfg_break = self.pomo.break_min.to_string();
                     self.cfg_auto = self.pomo.auto_next;
@@ -129,7 +130,7 @@ impl App {
         let wide = screen_w >= 500.0;
         let width = (screen_w - 64.0).clamp(300.0, 540.0);
 
-        egui::Area::new(egui::Id::new("settings-popup"))
+        let area = egui::Area::new(egui::Id::new("settings-popup"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .fade_in(false)
@@ -169,6 +170,13 @@ impl App {
                 );
             });
 
+        let popup_rect = area.response.rect.expand(8.0);
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let clicked_outside = ctx.input(|i| i.pointer.any_click())
+            && pointer.map(|p| !popup_rect.contains(p)).unwrap_or(false);
+        if self.frames > self.settings_opened_frame && clicked_outside {
+            act.close = true;
+        }
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             act.close = true;
         }
@@ -712,13 +720,17 @@ impl App {
                         .desired_width(width - 60.0)
                         .font(theme::regular_font(13.0)),
                 );
-                if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.commit_add_subject(group.id);
                 }
                 if edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     self.add_subject_group = None;
+                    self.add_subject_focus = false;
                 }
-                edit.request_focus();
+                if self.add_subject_focus {
+                    edit.request_focus();
+                    self.add_subject_focus = false;
+                }
                 if theme::bevel(ui, "add", true).clicked() {
                     self.commit_add_subject(group.id);
                 }
@@ -750,6 +762,7 @@ impl App {
         let name = self.add_subject_text.trim().to_string();
         if name.is_empty() {
             self.add_subject_group = None;
+            self.add_subject_focus = false;
             return;
         }
         if self
@@ -759,6 +772,7 @@ impl App {
         {
             self.add_subject_text.clear();
             self.add_subject_group = None;
+            self.add_subject_focus = false;
             self.reload_tracker();
         }
     }
@@ -1020,10 +1034,9 @@ impl App {
             },
         );
         if kebab_resp.clicked() {
-            self.tracker_menu = Some((
-                subject.id,
-                kebab_rect.left_bottom() + egui::Vec2::new(-120.0, 4.0),
-            ));
+            let pos = kebab_rect.left_bottom() + egui::Vec2::new(-120.0, 4.0);
+            self.tracker_menu =
+                Some((subject.id, self.clamp_menu_pos(ui.ctx(), pos, 160.0, 190.0)));
         }
 
         if self.tracker_editor == Some(subject.id) {

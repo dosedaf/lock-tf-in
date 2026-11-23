@@ -8,6 +8,9 @@ pub mod summary;
 pub mod tracker;
 
 pub use db::{read_setting, Db};
+
+#[cfg(test)]
+mod tests;
 pub use model::*;
 pub use pomodoro::{notify_phase, PomoAction};
 

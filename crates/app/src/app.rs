@@ -30,6 +30,7 @@ pub struct Dialog {
     pub value: String,
     pub kind: DialogKind,
     pub error: Option<String>,
+    pub needs_focus: bool,
 }
 
 #[derive(Clone)]
@@ -51,6 +52,7 @@ pub struct App {
     pub tasks_expanded: bool,
     pub done_collapsed: bool,
     pub add_open: bool,
+    pub add_focus: bool,
     pub add_text: String,
     pub edit_id: Option<i64>,
     pub edit_text: String,
@@ -96,6 +98,7 @@ pub struct App {
     pub drag_task: Option<i64>,
     pub drag_target: Option<i64>,
     pub add_subject_group: Option<i64>,
+    pub add_subject_focus: bool,
     pub add_subject_text: String,
     pub trk_name: String,
     pub trk_url: String,
@@ -121,6 +124,7 @@ pub struct App {
     pub window_started_at: Instant,
     pub always_on_top: bool,
     pub window_level_applied: bool,
+    pub settings_opened_frame: u64,
     pub drag_group: Option<i64>,
     pub drag_group_target: Option<i64>,
     pub drag_subject: Option<(i64, i64)>,
@@ -193,6 +197,7 @@ impl App {
             tasks_expanded: false,
             done_collapsed: true,
             add_open: false,
+            add_focus: false,
             add_text: String::new(),
             edit_id: None,
             edit_text: String::new(),
@@ -233,6 +238,7 @@ impl App {
             drag_task: None,
             drag_target: None,
             add_subject_group: None,
+            add_subject_focus: false,
             add_subject_text: String::new(),
             trk_name: String::new(),
             trk_url: String::new(),
@@ -257,6 +263,7 @@ impl App {
             window_started_at: Instant::now(),
             always_on_top,
             window_level_applied: false,
+            settings_opened_frame: 0,
             drag_group: None,
             drag_group_target: None,
             drag_subject: None,
@@ -379,6 +386,7 @@ impl App {
         if ctx.input(|i| i.viewport().close_requested()) {
             if self.quitting || QUIT_REQUESTED.load(std::sync::atomic::Ordering::Relaxed) {
                 self.save_window_now(ctx);
+                self.flush_note();
                 let _ = std::fs::remove_file(crate::socket_path());
                 let _ = std::fs::remove_file(crate::pid_path());
             } else {
@@ -685,6 +693,25 @@ impl App {
         self.apply_window_size(ctx, 960.0, 780.0);
     }
 
+    pub fn clamp_menu_pos(
+        &self,
+        ctx: &egui::Context,
+        pos: egui::Pos2,
+        width: f32,
+        height: f32,
+    ) -> egui::Pos2 {
+        let screen = ctx.screen_rect();
+        let x = pos.x.clamp(
+            screen.left() + 4.0,
+            (screen.right() - width - 4.0).max(screen.left() + 4.0),
+        );
+        let y = pos.y.clamp(
+            screen.top() + 4.0,
+            (screen.bottom() - height - 4.0).max(screen.top() + 4.0),
+        );
+        egui::Pos2::new(x, y)
+    }
+
     pub fn native_window_size(&self, ctx: &egui::Context) -> (u32, u32) {
         let size = ctx.screen_rect().size() * self.zoom;
         (
@@ -751,6 +778,13 @@ impl App {
                 self.settings_needs_sync = true;
             }
             _ => {}
+        }
+    }
+
+    fn flush_note(&mut self) {
+        if self.note_dirty {
+            let _ = self.db.set_scratchpad(&self.note);
+            self.note_dirty = false;
         }
     }
 
@@ -948,14 +982,18 @@ impl App {
                         .desired_width(width - 80.0)
                         .font(theme::regular_font(13.0)),
                 );
-                if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.commit_add();
                 }
                 if edit.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     self.add_open = false;
+                    self.add_focus = false;
                     self.add_text.clear();
                 }
-                edit.request_focus();
+                if self.add_focus {
+                    edit.request_focus();
+                    self.add_focus = false;
+                }
                 if theme::bevel(ui, "add", true).clicked() {
                     self.commit_add();
                 }
@@ -973,6 +1011,7 @@ impl App {
                 theme::paint_plus(ui.painter(), rect.center(), 11.0, color);
                 if response.clicked() {
                     self.add_open = true;
+                    self.add_focus = true;
                     self.add_text.clear();
                 }
                 if response.hovered() {
@@ -1021,6 +1060,7 @@ impl App {
         let text = self.add_text.trim().to_string();
         if text.is_empty() {
             self.add_open = false;
+            self.add_focus = false;
             self.add_text.clear();
             return;
         }
@@ -1028,6 +1068,7 @@ impl App {
             self.reload_tasks();
             self.add_text.clear();
             self.add_open = false;
+            self.add_focus = false;
         }
     }
 
@@ -1050,10 +1091,8 @@ impl App {
             );
         }
         if row_response.secondary_clicked() {
-            self.task_menu = Some((
-                task.id,
-                ui.ctx().pointer_latest_pos().unwrap_or(row_rect.center()),
-            ));
+            let pos = ui.ctx().pointer_latest_pos().unwrap_or(row_rect.center());
+            self.task_menu = Some((task.id, self.clamp_menu_pos(ui.ctx(), pos, 180.0, 160.0)));
         }
         if row_response.drag_started() {
             self.drag_task = Some(task.id);
@@ -1139,7 +1178,17 @@ impl App {
             );
             theme::paint_pencil(ui.painter(), pencil_rect, theme::MUTED);
         }
-        let text_resp = ui.interact(text_rect, ui.id().with(("text", task.id)), Sense::click());
+        let text_resp = ui.interact(
+            text_rect,
+            ui.id().with(("text", task.id)),
+            Sense::click_and_drag(),
+        );
+        if text_resp.drag_started() {
+            self.drag_task = Some(task.id);
+        }
+        if self.drag_task.is_some() && text_resp.hovered() {
+            self.drag_target = Some(task.id);
+        }
         if text_resp.clicked() {
             self.open_editor(task);
         }
@@ -1270,7 +1319,7 @@ impl App {
         let mut close = false;
         let mut new_state = None;
         let mut delete = false;
-        egui::Area::new(egui::Id::new("task-menu"))
+        let area = egui::Area::new(egui::Id::new("task-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
@@ -1307,7 +1356,11 @@ impl App {
                 self.edit_id = None;
             }
         }
-        if close || ctx.input(|i| i.pointer.any_click()) && !ctx.is_pointer_over_area() {
+        let menu_rect = area.response.rect.expand(8.0);
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let clicked_outside = ctx.input(|i| i.pointer.any_click())
+            && pointer.map(|p| !menu_rect.contains(p)).unwrap_or(false);
+        if close || clicked_outside {
             self.task_menu = None;
         }
     }
@@ -1331,7 +1384,7 @@ impl App {
         let mut set_state: Option<&'static str> = None;
         let mut clear_snooze = false;
         let mut delete = false;
-        egui::Area::new(egui::Id::new("tracker-menu"))
+        let area = egui::Area::new(egui::Id::new("tracker-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
@@ -1394,7 +1447,11 @@ impl App {
                 "",
             );
         }
-        if close || (ctx.input(|i| i.pointer.any_click()) && !ctx.is_pointer_over_area()) {
+        let menu_rect = area.response.rect.expand(8.0);
+        let pointer = ctx.input(|i| i.pointer.interact_pos());
+        let clicked_outside = ctx.input(|i| i.pointer.any_click())
+            && pointer.map(|p| !menu_rect.contains(p)).unwrap_or(false);
+        if close || clicked_outside {
             self.tracker_menu = None;
         }
     }
@@ -1406,6 +1463,7 @@ impl App {
             value: value.to_string(),
             kind,
             error: None,
+            needs_focus: true,
         });
     }
 
@@ -1447,7 +1505,10 @@ impl App {
                                     .desired_width(f32::INFINITY)
                                     .font(theme::regular_font(13.0)),
                             );
-                            edit.request_focus();
+                            if dialog.needs_focus {
+                                edit.request_focus();
+                                dialog.needs_focus = false;
+                            }
                             if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                                 action = Some(true);
                             }
