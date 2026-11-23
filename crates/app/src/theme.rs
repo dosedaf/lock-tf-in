@@ -486,3 +486,17 @@ pub fn paint_link_arrow(painter: &egui::Painter, rect: Rect, color: Color32) {
         Stroke::new(1.0_f32, color),
     );
 }
+
+
+pub fn popup_frame() -> egui::Frame {
+    egui::Frame::none()
+        .fill(FIELD)
+        .stroke(Stroke::new(1.0_f32, BEVEL_HI))
+        .shadow(egui::epaint::Shadow {
+            offset: [4, 4],
+            blur: 0,
+            spread: 0,
+            color: Color32::BLACK,
+        })
+        .inner_margin(egui::Margin::symmetric(16, 12))
+}

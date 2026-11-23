@@ -49,6 +49,11 @@ fn parse_args() -> (Option<String>, bool) {
 }
 
 fn socket_path() -> PathBuf {
+    if let Ok(path) = std::env::var("LOCKIN_SOCKET") {
+        if !path.is_empty() {
+            return PathBuf::from(path);
+        }
+    }
     let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
     Path::new(&runtime).join("lockin-app.sock")
 }
@@ -120,8 +125,11 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("LOCK IN")
-            .with_inner_size([1280.0, 860.0])
-            .with_min_inner_size([860.0, 600.0])
+            .with_inner_size([1080.0, 740.0])
+            .with_min_inner_size([900.0, 600.0])
+            .with_resizable(true)
+            .with_maximized(false)
+            .with_decorations(false)
             .with_app_id("org.lockin.app")
             .with_icon(app_icon()),
         ..Default::default()

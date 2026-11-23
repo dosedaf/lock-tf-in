@@ -130,7 +130,6 @@ pub struct App {
 impl App {
     pub fn new(ctx: &egui::Context, db_path: std::path::PathBuf) -> Self {
         let db = Db::open(&db_path).expect("open lockin database");
-        ctx.set_zoom_factor(1.3);
 
         let ceramic = load_texture(ctx, "ceramic", include_bytes!("../../../assets/img/ceramic.gif"));
         let arrow = load_texture(ctx, "arrow", include_bytes!("../../../assets/img/arrow.gif"));
@@ -247,6 +246,9 @@ impl App {
                 .map(std::path::PathBuf::from),
             frames: 0,
         };
+        if std::env::var("LOCKIN_DIALOG").ok().as_deref() == Some("group") {
+            app.open_prompt(DialogKind::AddGroup, "add group", "group name (e.g. stream processing)", "");
+        }
         if std::env::var("LOCKIN_LOG_OPEN").ok().as_deref() == Some("periods") {
             app.periods_open = true;
         }
@@ -341,6 +343,7 @@ impl App {
 
         if !self.hidden {
             self.hotkeys(ctx);
+            self.resize_edges(ctx);
         }
 
         if self.last_pomo_fetch.elapsed() >= Duration::from_millis(700) {
@@ -390,6 +393,9 @@ impl App {
 
         self.task_menu_window(ctx);
         self.tracker_menu_window(ctx);
+        if self.settings_open {
+            self.settings_popup(ctx);
+        }
         self.dialog_window(ctx);
         self.maybe_screenshot(ctx);
 
@@ -404,7 +410,7 @@ impl App {
 
     fn maybe_screenshot(&mut self, ctx: &egui::Context) {
         let Some(path) = self.screenshot_path.clone() else { return };
-        if self.frames >= 5 && self.frames % 10 == 0 {
+        if (2..=6).contains(&self.frames) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
         }
         let image = ctx.input(|i| {
@@ -525,6 +531,23 @@ impl App {
     // ---------------------------------------------------------------- chrome
 
     fn masthead(&mut self, ui: &mut Ui) {
+        let drag_rect = egui::Rect::from_min_size(
+            ui.cursor().min,
+            Vec2::new(ui.available_width(), 54.0),
+        );
+        let drag = ui.interact(
+            drag_rect,
+            ui.id().with("window-drag"),
+            Sense::click_and_drag(),
+        );
+        if drag.drag_started() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        if drag.double_clicked() {
+            let maxed = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maxed));
+        }
         ui.add_space(20.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
@@ -533,7 +556,9 @@ impl App {
             );
             ui.add_space(1.0);
             ui.label(theme::i("est. black mesa research facility.", 10.0).color(theme::MUTED));
-            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                self.window_controls(ui);
+                ui.add_space(12.0);
                 ui.vertical(|ui| {
                     ui.with_layout(Layout::top_down(Align::Max), |ui| {
                         ui.label(theme::tc("v1.0 · build 1998", 10.0, theme::MUTED));
@@ -557,6 +582,54 @@ impl App {
                 }
             }
         });
+    }
+
+    fn window_controls(&mut self, ui: &mut Ui) {
+        ui.spacing_mut().item_spacing.x = 1.0;
+        let close = wc_button(ui, "close");
+        if close.clicked() {
+            self.quitting = true;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        let max = wc_button(ui, "max");
+        if max.clicked() {
+            let maxed = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maxed));
+        }
+        let min = wc_button(ui, "min");
+        if min.clicked() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+    }
+
+    fn resize_edges(&mut self, ctx: &egui::Context) {
+        use egui::ResizeDirection as D;
+        let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else {
+            return;
+        };
+        let r = ctx.screen_rect();
+        let m = 6.0;
+        let left = pos.x <= r.left() + m;
+        let right = pos.x >= r.right() - m;
+        let top = pos.y <= r.top() + m;
+        let bottom = pos.y >= r.bottom() - m;
+        let (dir, cursor) = match (left, right, top, bottom) {
+            (true, _, true, _) => (D::NorthWest, egui::CursorIcon::ResizeNwSe),
+            (_, true, true, _) => (D::NorthEast, egui::CursorIcon::ResizeNeSw),
+            (true, _, _, true) => (D::SouthWest, egui::CursorIcon::ResizeNeSw),
+            (_, true, _, true) => (D::SouthEast, egui::CursorIcon::ResizeNwSe),
+            (true, _, _, _) => (D::West, egui::CursorIcon::ResizeHorizontal),
+            (_, true, _, _) => (D::East, egui::CursorIcon::ResizeHorizontal),
+            (_, _, true, _) => (D::North, egui::CursorIcon::ResizeVertical),
+            (_, _, _, true) => (D::South, egui::CursorIcon::ResizeVertical),
+            _ => return,
+        };
+        ctx.set_cursor_icon(cursor);
+        if ctx.input(|i| i.pointer.primary_pressed()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(dir));
+        }
     }
 
     fn navigation(&mut self, _ui: &mut Ui) {}
@@ -1097,18 +1170,6 @@ impl App {
 
     fn dialog_window(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.dialog.take() else { return };
-        let screen = ctx.screen_rect();
-        egui::Area::new(egui::Id::new("dialog-dim"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(screen.min)
-            .show(ctx, |ui| {
-                ui.painter().rect_filled(
-                    screen,
-                    0.0,
-                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 150),
-                );
-            });
-
         let confirm_only = matches!(
             dialog.kind,
             DialogKind::ConfirmDeleteGroup(..)
@@ -1116,40 +1177,55 @@ impl App {
                 | DialogKind::ConfirmDeleteCategory(..)
         );
         let mut action: Option<bool> = None;
-        egui::Window::new(dialog.title.clone())
+        egui::Window::new("dialog")
             .id(egui::Id::new("lockin-dialog"))
-            .collapsible(false)
+            .title_bar(false)
+            .fade_in(false)
             .resizable(false)
+            .collapsible(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(theme::popup_frame())
             .show(ctx, |ui| {
-                ui.set_min_width(300.0);
-                ui.label(theme::t(dialog.label.clone(), 13.0).color(theme::GOLD));
-                if !confirm_only {
-                    let edit = ui.add(
-                        egui::TextEdit::singleline(&mut dialog.value)
-                            .desired_width(f32::INFINITY)
-                            .font(theme::regular_font(13.0)),
-                    );
-                    edit.request_focus();
-                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        action = Some(true);
+                {
+                    ui.set_width(if confirm_only { 360.0 } else { 340.0 });
+                    ui.horizontal(|ui| {
+                        ui.label(theme::b(dialog.title.clone(), 13.0).color(theme::BRIGHT));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if popup_close(ui) {
+                                action = Some(false);
+                            }
+                        });
+                    });
+                    ui.add_space(8.0);
+                    ui.label(theme::t(dialog.label.clone(), 12.5).color(theme::GOLD));
+                    if !confirm_only {
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut dialog.value)
+                                .desired_width(f32::INFINITY)
+                                .font(theme::regular_font(13.0)),
+                        );
+                        edit.request_focus();
+                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            action = Some(true);
+                        }
                     }
+                    if let Some(error) = &dialog.error {
+                        ui.label(theme::tc(error, 12.0, theme::RED_HOT));
+                    }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let yes = if confirm_only { "delete" } else { "ok" };
+                        if theme::bevel(ui, yes, true).clicked() {
+                            action = Some(true);
+                        }
+                        if theme::bevel(ui, "cancel", false).clicked() {
+                            action = Some(false);
+                        }
+                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            action = Some(false);
+                        }
+                    });
                 }
-                if let Some(error) = &dialog.error {
-                    ui.label(theme::tc(error, 12.0, theme::RED_HOT));
-                }
-                ui.horizontal(|ui| {
-                    let yes = if confirm_only { "delete" } else { "ok" };
-                    if theme::bevel(ui, yes, true).clicked() {
-                        action = Some(true);
-                    }
-                    if theme::bevel(ui, "cancel", false).clicked() {
-                        action = Some(false);
-                    }
-                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        action = Some(false);
-                    }
-                });
             });
 
         match action {
@@ -1244,6 +1320,55 @@ fn load_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> TextureHandle 
             TextureOptions::NEAREST,
         ),
     }
+}
+
+pub fn wc_button(ui: &mut Ui, kind: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 20.0), Sense::click());
+    let color = if response.hovered() {
+        theme::RED
+    } else {
+        theme::MUTED
+    };
+    match kind {
+        "min" => {
+            ui.painter().line_segment(
+                [
+                    Pos2::new(rect.center().x - 4.5, rect.center().y),
+                    Pos2::new(rect.center().x + 4.5, rect.center().y),
+                ],
+                Stroke::new(1.0_f32, color),
+            );
+        }
+        "max" => {
+            ui.painter().rect_stroke(
+                Rect::from_center_size(rect.center(), Vec2::splat(8.0)),
+                0.0,
+                Stroke::new(1.0_f32, color),
+                egui::StrokeKind::Middle,
+            );
+        }
+        _ => {
+            theme::paint_x(ui.painter(), rect.center(), 8.0, color);
+        }
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
+}
+
+fn popup_close(ui: &mut Ui) -> bool {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(16.0, 16.0), Sense::click());
+    let color = if response.hovered() {
+        theme::RED_HOT
+    } else {
+        theme::MUTED
+    };
+    theme::paint_x(ui.painter(), rect.center(), 8.0, color);
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response.clicked()
 }
 
 pub fn menu_frame<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {

@@ -33,37 +33,37 @@ impl App {
         };
         let blink = ui.input(|i| i.time * 3.2).sin() > -0.3;
         let clock_color = if ended {
-            if blink {
-                theme::RED
-            } else {
-                theme::DIM
-            }
+            if blink { theme::RED } else { theme::DIM }
         } else if running {
             theme::BRIGHT
         } else {
             theme::GOLD
         };
 
-        ui.add_space(46.0);
+        // keep the timer block vertically centered in the window
+        let content_h = 180.0;
+        let screen = ui.ctx().screen_rect();
+        let top = ((screen.height() - content_h) / 2.0 - ui.cursor().top()).max(0.0);
+        ui.add_space(top);
         ui.vertical_centered(|ui| {
             ui.label(theme::b(phase.to_lowercase(), 12.0).color(theme::MUTED));
-            ui.add_space(1.0);
-            theme::centered_big(ui, &fmt_clock(remaining), 38.0, clock_color);
-            ui.add_space(16.0);
+            ui.add_space(4.0);
+            theme::centered_big(ui, &fmt_clock(remaining), 44.0, clock_color);
+            ui.add_space(14.0);
+            let toggle = if running {
+                "pause"
+            } else if ended || remaining <= 0 {
+                "start next"
+            } else {
+                "start"
+            };
+            let total = theme::text_width(ui, toggle, theme::regular_font(13.0))
+                + theme::text_width(ui, "reset", theme::regular_font(13.0))
+                + theme::text_width(ui, "skip", theme::regular_font(13.0))
+                + 32.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 16.0;
-                let total = theme::text_width(ui, "pause", theme::regular_font(13.0))
-                    + theme::text_width(ui, "reset", theme::regular_font(13.0))
-                    + theme::text_width(ui, "skip", theme::regular_font(13.0))
-                    + 32.0;
                 ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
-                let toggle = if running {
-                    "pause"
-                } else if ended || remaining <= 0 {
-                    "start next"
-                } else {
-                    "start"
-                };
                 if theme::link(ui, toggle, 13.0, theme::RED).clicked() {
                     let action = if running {
                         PomoAction::Pause
@@ -83,33 +83,21 @@ impl App {
                     self.reload_timer();
                 }
             });
-            ui.add_space(11.0);
+            ui.add_space(14.0);
             ui.horizontal(|ui| {
                 let total = theme::text_width(ui, "today ", theme::regular_font(13.0))
                     + 4.0
-                    + theme::text_width(ui, &fmt_hm(self.pomo.today_focused_min), theme::bold_font(13.0));
+                    + theme::text_width(
+                        ui,
+                        &fmt_hm(self.pomo.today_focused_min),
+                        theme::bold_font(13.0),
+                    );
                 ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
                 ui.label(theme::t("today ", 13.0).color(theme::MUTED));
                 ui.label(theme::b(fmt_hm(self.pomo.today_focused_min), 13.0).color(theme::BRIGHT));
             });
-            ui.add_space(63.0);
-            let caret = if self.settings_open {
-                "▾ settings"
-            } else {
-                "▸ settings"
-            };
-            let caret = caret.trim_start_matches(|c| c == '▾' || c == '▸').trim();
-            if theme::caret_link(
-                ui,
-                caret,
-                if self.settings_open {
-                    theme::Caret::Down
-                } else {
-                    theme::Caret::Right
-                },
-            )
-            .clicked()
-            {
+            ui.add_space(14.0);
+            if theme::link(ui, "settings", 13.0, theme::RED).clicked() {
                 self.settings_open = !self.settings_open;
                 if self.settings_open {
                     self.cfg_focus = self.pomo.focus_min.to_string();
@@ -118,179 +106,211 @@ impl App {
                 }
             }
         });
+    }
 
-        if self.settings_open {
-            ui.add_space(12.0);
-            let mut set_category: Option<Option<i64>> = None;
-            let mut set_subject: Option<Option<i64>> = None;
-            let mut add_category = false;
-            let mut rename_category = false;
-            let mut delete_category = false;
-            let mut save_cfg = false;
-            let cats: Vec<(i64, String)> = self
-                .categories
-                .iter()
-                .map(|c| (c.id, c.name.clone()))
-                .collect();
-            let subjects = self.subjects.clone();
-            let cur_cat = self.pomo.category.as_ref().map(|c| c.id);
-            let cur_subj = self.pomo.subject.as_ref().map(|s| s.id);
-            ui.columns(2, |cols| {
-                let left = &mut cols[0];
-                left.label(theme::b("timer", 13.0).color(theme::GOLD));
-                left.horizontal(|ui| {
-                    ui.label(theme::i("focus", 12.0).color(theme::MUTED));
-                    ui.add_sized(
-                        [54.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.cfg_focus)
-                            .font(theme::regular_font(13.0)),
-                    );
-                    ui.label(theme::i("break", 12.0).color(theme::MUTED));
-                    ui.add_sized(
-                        [54.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.cfg_break)
-                            .font(theme::regular_font(13.0)),
-                    );
-                });
-                left.add_space(4.0);
-                left.checkbox(&mut self.cfg_auto, "auto-start next phase")
-                    .on_hover_text("start the next phase automatically");
-                left.add_space(4.0);
-                left.horizontal(|ui| {
-                    if theme::link(ui, "save", 13.0, theme::RED).clicked() {
-                        save_cfg = true;
-                    }
-                    if let Some((msg, ok, at)) = &self.cfg_msg {
-                        if at.elapsed().as_secs() < 3 {
-                            ui.label(theme::tc(
-                                msg,
-                                12.0,
-                                if *ok { theme::MUTED } else { theme::RED_HOT },
-                            ));
-                        }
-                    }
-                });
+    pub fn settings_popup(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut set_category: Option<Option<i64>> = None;
+        let mut set_subject: Option<Option<i64>> = None;
+        let mut add_category = false;
+        let mut rename_category = false;
+        let mut delete_category = false;
+        let mut save_cfg = false;
+        let cats: Vec<(i64, String)> = self
+            .categories
+            .iter()
+            .map(|c| (c.id, c.name.clone()))
+            .collect();
+        let subjects = self.subjects.clone();
+        let cur_cat = self.pomo.category.as_ref().map(|c| c.id);
+        let cur_subj = self.pomo.subject.as_ref().map(|s| s.id);
 
-                let right = &mut cols[1];
-                right.label(theme::b("context", 13.0).color(theme::GOLD));
-                right.label(theme::i("category", 12.0).color(theme::MUTED));
-                let selected = cats
-                    .iter()
-                    .find(|(id, _)| Some(*id) == cur_cat)
-                    .map(|(_, name)| name.clone())
-                    .unwrap_or_else(|| "Unallocated".into());
-                egui::ComboBox::from_id_salt("cat-select")
-                    .width(190.0)
-                    .selected_text(selected)
-                    .show_ui(right, |ui| {
-                        if ui
-                            .selectable_label(cur_cat.is_none(), "Unallocated")
-                            .clicked()
-                        {
-                            set_category = Some(None);
-                        }
-                        for (id, name) in &cats {
-                            if ui
-                                .selectable_label(Some(*id) == cur_cat, name)
-                                .clicked()
-                            {
-                                set_category = Some(Some(*id));
+        egui::Window::new("settings")
+            .id(egui::Id::new("settings-popup"))
+            .title_bar(false)
+            .fade_in(false)
+            .resizable(false)
+            .collapsible(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .frame(theme::popup_frame())
+            .show(ctx, |ui| {
+                {
+                    ui.set_width(540.0);
+                    ui.horizontal(|ui| {
+                        ui.label(theme::b("settings", 13.0).color(theme::BRIGHT));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if popup_close(ui) {
+                                close = true;
                             }
-                        }
+                        });
                     });
-                right.horizontal(|ui| {
-                    ui.add_sized(
-                        [130.0, 24.0],
-                        egui::TextEdit::singleline(&mut self.category_new)
-                            .hint_text("new category...")
-                            .font(theme::regular_font(13.0)),
-                    );
-                    if theme::link(ui, "+", 13.0, theme::RED).clicked() {
-                        add_category = true;
-                    }
-                    if theme::link(ui, "rename", 12.0, theme::RED).clicked() {
-                        rename_category = true;
-                    }
-                    if theme::link(ui, "delete", 12.0, theme::RED).clicked() {
-                        delete_category = true;
-                    }
-                });
-                right.add_space(6.0);
-                right.label(theme::i("subject", 12.0).color(theme::MUTED));
-                let selected = self
-                    .pomo
-                    .subject
-                    .as_ref()
-                    .map(|s| s.name.clone())
-                    .unwrap_or_else(|| "none".into());
-                egui::ComboBox::from_id_salt("subj-select")
-                    .width(220.0)
-                    .selected_text(selected)
-                    .show_ui(right, |ui| {
-                        if ui.selectable_label(cur_subj.is_none(), "none").clicked() {
-                            set_subject = Some(None);
-                        }
-                        for (id, name, group) in &subjects {
-                            if ui
-                                .selectable_label(Some(*id) == cur_subj, format!("{group} · {name}"))
-                                .clicked()
-                            {
-                                set_subject = Some(Some(*id));
+                    ui.add_space(10.0);
+                    ui.columns(2, |cols| {
+                        let left = &mut cols[0];
+                        left.label(theme::b("timer", 13.0).color(theme::GOLD));
+                        left.horizontal(|ui| {
+                            ui.label(theme::i("focus", 12.0).color(theme::MUTED));
+                            ui.add_sized(
+                                [54.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.cfg_focus)
+                                    .font(theme::regular_font(13.0)),
+                            );
+                            ui.label(theme::i("break", 12.0).color(theme::MUTED));
+                            ui.add_sized(
+                                [54.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.cfg_break)
+                                    .font(theme::regular_font(13.0)),
+                            );
+                        });
+                        left.add_space(4.0);
+                        left.checkbox(&mut self.cfg_auto, "auto-start next phase");
+                        left.add_space(4.0);
+                        left.horizontal(|ui| {
+                            if theme::link(ui, "save", 13.0, theme::RED).clicked() {
+                                save_cfg = true;
                             }
-                        }
+                            if let Some((msg, ok, at)) = &self.cfg_msg {
+                                if at.elapsed().as_secs() < 3 {
+                                    ui.label(theme::tc(
+                                        msg,
+                                        12.0,
+                                        if *ok { theme::MUTED } else { theme::RED_HOT },
+                                    ));
+                                }
+                            }
+                        });
+
+                        let right = &mut cols[1];
+                        right.label(theme::b("context", 13.0).color(theme::GOLD));
+                        right.label(theme::i("category", 12.0).color(theme::MUTED));
+                        let selected = cats
+                            .iter()
+                            .find(|(id, _)| Some(*id) == cur_cat)
+                            .map(|(_, name)| name.clone())
+                            .unwrap_or_else(|| "Unallocated".into());
+                        egui::ComboBox::from_id_salt("cat-select")
+                            .width(190.0)
+                            .selected_text(selected)
+                            .show_ui(right, |ui| {
+                                if ui
+                                    .selectable_label(cur_cat.is_none(), "Unallocated")
+                                    .clicked()
+                                {
+                                    set_category = Some(None);
+                                }
+                                for (id, name) in &cats {
+                                    if ui.selectable_label(Some(*id) == cur_cat, name).clicked() {
+                                        set_category = Some(Some(*id));
+                                    }
+                                }
+                            });
+                        right.horizontal(|ui| {
+                            ui.add_sized(
+                                [130.0, 24.0],
+                                egui::TextEdit::singleline(&mut self.category_new)
+                                    .hint_text("new category...")
+                                    .font(theme::regular_font(13.0)),
+                            );
+                            if theme::link(ui, "+", 13.0, theme::RED).clicked() {
+                                add_category = true;
+                            }
+                            if theme::link(ui, "rename", 12.0, theme::RED).clicked() {
+                                rename_category = true;
+                            }
+                            if theme::link(ui, "delete", 12.0, theme::RED).clicked() {
+                                delete_category = true;
+                            }
+                        });
+                        right.add_space(6.0);
+                        right.label(theme::i("subject", 12.0).color(theme::MUTED));
+                        let selected = self
+                            .pomo
+                            .subject
+                            .as_ref()
+                            .map(|s| s.name.clone())
+                            .unwrap_or_else(|| "none".into());
+                        egui::ComboBox::from_id_salt("subj-select")
+                            .width(220.0)
+                            .selected_text(selected)
+                            .show_ui(right, |ui| {
+                                if ui.selectable_label(cur_subj.is_none(), "none").clicked() {
+                                    set_subject = Some(None);
+                                }
+                                for (id, name, group) in &subjects {
+                                    if ui
+                                        .selectable_label(
+                                            Some(*id) == cur_subj,
+                                            format!("{group} · {name}"),
+                                        )
+                                        .clicked()
+                                    {
+                                        set_subject = Some(Some(*id));
+                                    }
+                                }
+                            });
                     });
+                }
             });
 
-            if let Some(cat) = set_category {
-                let _ = self.db.pomo_action(PomoAction::SetCategory(cat));
-                self.reload_timer();
-            }
-            if let Some(sub) = set_subject {
-                let _ = self.db.pomo_action(PomoAction::SetSubject(sub));
-                self.reload_timer();
-            }
-            if add_category {
-                let name = self.category_new.trim().to_string();
-                if !name.is_empty() {
-                    if let Ok(id) = self.db.add_category(&name) {
-                        self.category_new.clear();
-                        self.reload_categories();
-                        let _ = self.db.pomo_action(PomoAction::SetCategory(Some(id)));
-                        self.reload_timer();
-                    }
-                }
-            }
-            if save_cfg {
-                let focus: i64 = self.cfg_focus.trim().parse().unwrap_or(-1);
-                let brk: i64 = self.cfg_break.trim().parse().unwrap_or(-1);
-                if !(1..=600).contains(&focus) || !(1..=600).contains(&brk) {
-                    self.cfg_msg = Some(("focus and break must be 1..600".into(), false, std::time::Instant::now()));
-                } else {
-                    let _ = self.db.pomo_action(PomoAction::Config {
-                        focus_min: focus,
-                        break_min: brk,
-                        auto_next: self.cfg_auto,
-                    });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            close = true;
+        }
+        if let Some(cat) = set_category {
+            let _ = self.db.pomo_action(PomoAction::SetCategory(cat));
+            self.reload_timer();
+        }
+        if let Some(sub) = set_subject {
+            let _ = self.db.pomo_action(PomoAction::SetSubject(sub));
+            self.reload_timer();
+        }
+        if add_category {
+            let name = self.category_new.trim().to_string();
+            if !name.is_empty() {
+                if let Ok(id) = self.db.add_category(&name) {
+                    self.category_new.clear();
+                    self.reload_categories();
+                    let _ = self.db.pomo_action(PomoAction::SetCategory(Some(id)));
                     self.reload_timer();
-                    self.cfg_msg = Some(("saved ✓".into(), true, std::time::Instant::now()));
                 }
             }
-            if rename_category {
-                if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
-                    self.open_prompt(DialogKind::RenameCategory(id), "rename category", "name", &name);
-                }
+        }
+        if save_cfg {
+            let focus: i64 = self.cfg_focus.trim().parse().unwrap_or(-1);
+            let brk: i64 = self.cfg_break.trim().parse().unwrap_or(-1);
+            if !(1..=600).contains(&focus) || !(1..=600).contains(&brk) {
+                self.cfg_msg = Some((
+                    "focus and break must be 1..600".into(),
+                    false,
+                    std::time::Instant::now(),
+                ));
+            } else {
+                let _ = self.db.pomo_action(PomoAction::Config {
+                    focus_min: focus,
+                    break_min: brk,
+                    auto_next: self.cfg_auto,
+                });
+                self.reload_timer();
+                self.cfg_msg = Some(("saved ✓".into(), true, std::time::Instant::now()));
             }
-            if delete_category {
-                if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
-                    let label = format!("delete \"{name}\"? its focus periods become Unallocated.");
-                    self.open_prompt(
-                        DialogKind::ConfirmDeleteCategory(id, name),
-                        "delete category",
-                        &label,
-                        "",
-                    );
-                }
+        }
+        if rename_category {
+            if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
+                self.open_prompt(DialogKind::RenameCategory(id), "rename category", "name", &name);
             }
+        }
+        if delete_category {
+            if let Some((id, name)) = self.pomo.category.as_ref().map(|c| (c.id, c.name.clone())) {
+                let label = format!("delete \"{name}\"? its focus periods become Unallocated.");
+                self.open_prompt(
+                    DialogKind::ConfirmDeleteCategory(id, name),
+                    "delete category",
+                    &label,
+                    "",
+                );
+            }
+        }
+        if close {
+            self.settings_open = false;
         }
     }
 
@@ -1124,4 +1144,15 @@ fn pretty_month(value: &str) -> String {
         Ok((y, m)) if (1..=12).contains(&m) => format!("{} {y}", NAMES[m as usize - 1]),
         _ => value.to_string(),
     }
+}
+
+
+fn popup_close(ui: &mut Ui) -> bool {
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::new(16.0, 16.0), egui::Sense::click());
+    let color = if response.hovered() { theme::RED_HOT } else { theme::MUTED };
+    theme::paint_x(ui.painter(), rect.center(), 8.0, color);
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response.clicked()
 }
