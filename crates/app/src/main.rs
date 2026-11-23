@@ -125,7 +125,7 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("LOCK IN")
-            .with_inner_size([1000.0, 780.0])
+            .with_inner_size([900.0, 780.0])
             .with_min_inner_size([860.0, 620.0])
             .with_resizable(true)
             .with_maximized(false)

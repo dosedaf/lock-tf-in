@@ -146,7 +146,7 @@ impl App {
         let zoom: f32 = db
             .get_setting("ui_zoom")
             .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(1.3)
+            .unwrap_or(1.4)
             .clamp(0.9, 2.0);
         ctx.set_zoom_factor(zoom);
         let group_expanded: HashSet<i64> = db
@@ -395,7 +395,7 @@ impl App {
                     Vec2::new(full, 36.0),
                     Layout::left_to_right(Align::Center),
                     |ui| {
-                        ui.add_space(16.0);
+                        ui.add_space(24.0);
                         ui.spacing_mut().item_spacing.x = 10.0;
                         ui.label(theme::b("lock tf in", 16.0).color(theme::GOLD));
                         ui.label(
@@ -422,7 +422,7 @@ impl App {
                     Vec2::new(full, 34.0),
                     Layout::left_to_right(Align::Center),
                     |ui| {
-                        ui.add_space(16.0);
+                        ui.add_space(24.0);
                         ui.spacing_mut().item_spacing.x = 18.0;
                         for (view, label) in [
                             (View::Tasks, "tasks"),
@@ -448,7 +448,7 @@ impl App {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        let pad = 16.0;
+                        let pad = 24.0;
                         let content_width = (full - pad * 2.0).max(240.0);
                         ui.horizontal(|ui| {
                             ui.add_space(pad);
@@ -562,7 +562,7 @@ impl App {
             } else if ctx.input(|i| i.key_pressed(egui::Key::Minus)) {
                 self.set_zoom(ctx, self.zoom - 0.1);
             } else if ctx.input(|i| i.key_pressed(egui::Key::Num0)) {
-                self.set_zoom(ctx, 1.3);
+                self.set_zoom(ctx, 1.4);
             }
         }
         if !typing && ctx.input(|i| i.key_pressed(egui::Key::Space)) {
